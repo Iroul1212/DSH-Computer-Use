@@ -49,6 +49,7 @@ export const CONFIG_DEFAULTS = {
   screenshotTimeoutMs: 30000,
   idleDisarmMs: 60000,
   blocklist: [],
+  maskRegions: [],
   skills: true,
   skillsDir: null,
   skillsHint: true,
@@ -128,6 +129,15 @@ export function normalizeConfig(raw) {
     screenshotTimeoutMs: num(input.screenshotTimeoutMs, 30000, 1000, 600000),
     idleDisarmMs: num(input.idleDisarmMs, 60000, 0, 3600000),
     blocklist: Array.isArray(input.blocklist) ? input.blocklist.filter((s) => typeof s === 'string' && s.length > 0) : [],
+    // Privacy mask: physical-pixel rectangles that are painted out of EVERY
+    // capture before it is diffed, decorated or encoded. Not reachable from a
+    // tool call on purpose - a model must not be able to unmask itself.
+    maskRegions: Array.isArray(input.maskRegions)
+      ? input.maskRegions
+        .filter((r) => r && typeof r === 'object')
+        .map((r) => ({ x: Math.round(Number(r.x) || 0), y: Math.round(Number(r.y) || 0), width: Math.round(Number(r.width) || 0), height: Math.round(Number(r.height) || 0) }))
+        .filter((r) => r.width > 0 && r.height > 0)
+      : [],
     skills: input.skills !== false,
     skillsDir: typeof input.skillsDir === 'string' && input.skillsDir.length > 0 ? input.skillsDir : null,
     skillsHint: input.skillsHint !== false,
@@ -369,6 +379,12 @@ export class ComputerRuntime {
    */
   async call(cmd, args = {}, options = {}) {
     const host = await this.ensureHost()
+    // Single choke point for the privacy mask: every screenshot - the one the
+    // model looks at, the one OCR reads, the one wait_for diffs - goes through
+    // here, so a new call site cannot forget to mask.
+    if (cmd === 'screenshot' && this.config.maskRegions.length > 0 && !args.mask) {
+      args = { ...args, mask: this.config.maskRegions }
+    }
     if (this.config.overlay === 'always' && !this.overlayArmed) await this.ensureOverlay()
     return host.call(cmd, args, { timeoutMs: options.timeoutMs ?? this.config.requestTimeoutMs })
   }
@@ -679,6 +695,7 @@ export class ComputerRuntime {
       view,
       cursor: result.cursor ?? null,
       change: result.image?.change ?? null,
+      masked: result.image?.masked ?? 0,
       fallback: result.fallback ?? null,
       ui,
     }
@@ -714,6 +731,7 @@ export class ComputerRuntime {
       const iy = Math.round((result.cursor.y - view.capture.y) * view.scale)
       lines.push(`Cursor: physical (${result.cursor.x},${result.cursor.y}) = image (${ix},${iy}).`)
     }
+    if (result.image?.masked > 0) lines.push(`${result.image.masked} privacy-masked region${result.image.masked === 1 ? ' is' : 's are'} blacked out in this capture; anything there is intentionally invisible.`)
     lines.push(...describeChange(result.image?.change ?? null))
     if (result.fallback === 'screen') lines.push('Note: the requested window could not be captured directly, so the whole display was captured instead.')
     if (this.config.skillsHint) {

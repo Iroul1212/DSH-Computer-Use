@@ -402,6 +402,17 @@ What is enforced, in the order `beforeMutation` applies it:
 | **Approval** | With `requireApproval: mutating`, `ctx.approval.request({agent, toolName, callId, reason, signal})` is asked and only `allowed-once` proceeds. Everything else — including a missing approval service — fails closed. This only buys safety when the session approval policy is `ask`; a policy of `never` (`DSH_PERMISSION_MODE=danger-full-access`) rejects every ask. |
 | **Dry run** | After the gates above: returns `[dry run] Would …`, records the intent, and sends nothing to the OS. |
 
+### Privacy mask
+
+`maskRegions` (physical-pixel rectangles, set by the deployment, never by the model) are painted out of **every** capture before it is diffed, decorated or encoded: the attachment the model sees, the frame signature behind `compare`/`verify`/`wait_for stable`, and the PNG that the OCR engine reads all see solid black there. A masked capture says so in its text (`N privacy-masked regions are blacked out`) so the model knows why something is invisible, and `masked: null` on a call cannot turn it off — the runtime injects the mask at the single choke point every screenshot passes through.
+
+```yaml
+maskRegions:
+  - { x: 0, y: 1180, width: 2560, height: 120 }   # e.g. a password-manager bar
+```
+
+Use it for notification popups, chat sidebars, terminals with secrets, or any window you keep visible while the agent works. It hides pixels from the *model*; it does not stop the agent from typing into or clicking a masked area.
+
 Mutating actions (they pass all of the above): `move`, `click`, `double_click`, `right_click`, `middle_click`, `drag`, `scroll`, `type`, `key`; `app_window` `launch`, `close`, `minimize`, `maximize`, `restore`; `ui_element` `invoke`, `set_value`, `focus`, `expand`, `collapse`, `select`; `clipboard` `set`. Reads that never mutate: `screenshot`, `cursor`, `status`, `wait`, `resume`, `app_window` `list` / `focus`, `ui_element` `tree` / `find`, `clipboard` `get`.
 
 ### What it does not protect

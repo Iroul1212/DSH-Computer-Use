@@ -51,5 +51,14 @@
         # Print the "App skill available for X" line in every screenshot result.
         skillsHint: true
 
+        # Privacy mask. Physical-pixel rectangles that are painted out of EVERY
+        # capture before it is diffed, decorated or encoded - the attachment, the
+        # frame cache and the PNG that OCR reads all see black there. Rectangles
+        # are in physical screen pixels (the same space window bounds use).
+        #
+        # maskRegions:
+        #   - { x: 0, y: 1180, width: 2560, height: 120 }   # e.g. a password manager bar
+        maskRegions: []
+
 
 

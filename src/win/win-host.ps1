@@ -817,6 +817,10 @@ function Invoke-Cmd-Screenshot($a) {
         $msTransform = [int]$sw.ElapsedMilliseconds
         $imgW = [int]$bmp.Width
         $imgH = [int]$bmp.Height
+        # Mask first: masked pixels must never reach the diff, the decorations or
+        # the encoder.
+        $masked = Add-ScreenshotMask $bmp (Get-Arg $a 'mask' $null) $capture
+
         # Diff against the previous capture BEFORE drawing on this one: the grid
         # and the markers would otherwise be counted as "the screen changed".
         $change = Get-FrameChange $bmp $a
@@ -838,6 +842,7 @@ function Invoke-Cmd-Screenshot($a) {
         image = [ordered]@{
             base64 = [System.Convert]::ToBase64String($bytes)
             decorated = $decorated
+            masked = [int]$masked
             change = $change
             mime   = 'image/' + $format
             width  = $imgW

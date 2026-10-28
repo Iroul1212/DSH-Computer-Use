@@ -137,6 +137,40 @@ function Add-ScreenshotDecorations($bmp, $a, $capture = $null) {
   } finally { $g.Dispose() }
   return $true
 }
+function Add-ScreenshotMask($bmp, $rects, $capture = $null) {
+  # Privacy mask. Rectangles arrive in PHYSICAL screen pixels and are filled in
+  # place BEFORE the image is diffed, decorated or encoded, so the pixels under
+  # them never leave this process - not in the attachment, not in the frame cache,
+  # and not in the PNG that OCR reads.
+  if ($null -eq $rects) { return 0 }
+  $scale = 1.0
+  if ($null -ne $capture -and [int]$capture.width -gt 0) { $scale = $bmp.Width / [double]$capture.width }
+  $originX = 0; $originY = 0
+  if ($null -ne $capture) { $originX = [int]$capture.x; $originY = [int]$capture.y }
+  $painted = 0
+  $g = [System.Drawing.Graphics]::FromImage($bmp)
+  try {
+    $brush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 12, 12, 12))
+    try {
+      foreach ($r in @($rects)) {
+        if ($null -eq $r) { continue }
+        $rx = [int](Get-DecValue $r 'x')
+        $ry = [int](Get-DecValue $r 'y')
+        $rw = [int](Get-DecValue $r 'width')
+        $rh = [int](Get-DecValue $r 'height')
+        if ($rw -lt 1 -or $rh -lt 1) { continue }
+        $ix = [int][math]::Round(($rx - $originX) * $scale)
+        $iy = [int][math]::Round(($ry - $originY) * $scale)
+        $iw = [int][math]::Ceiling($rw * $scale)
+        $ih = [int][math]::Ceiling($rh * $scale)
+        $g.FillRectangle($brush, $ix, $iy, $iw, $ih)
+        $painted++
+      }
+    } finally { $brush.Dispose() }
+  } finally { $g.Dispose() }
+  return $painted
+}
+
 function Get-FrameSignature($bmp, [int]$SampleWidth) {
   # Normalise any capture to one small ARGB frame so two screenshots of the same
   # target can be diffed cheaply, whatever their size or DPI.

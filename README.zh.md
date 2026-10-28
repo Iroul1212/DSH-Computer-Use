@@ -402,6 +402,17 @@ bundle 在 `cordis.patch.yml` 里只有一行，其余全部是这一行的 `con
 
 算作 mutating 的动作（要吃上面全部门）：`move`、`click`、`double_click`、`right_click`、`middle_click`、`drag`、`scroll`、`type`、`key`；`app_window` 的 `launch`、`close`、`minimize`、`maximize`、`restore`；`ui_element` 的 `invoke`、`set_value`、`focus`、`expand`、`collapse`、`select`；`clipboard` 的 `set`。纯读、绝不改动桌面的：`screenshot`、`cursor`、`status`、`wait`、`resume`、`app_window` 的 `list` / `focus`、`ui_element` 的 `tree` / `find`、`clipboard` 的 `get`。
 
+### 隐私遮罩
+
+`maskRegions`（物理像素矩形，由部署配置写入，模型改不了）会在**每一张**截图被比对、装饰、编码**之前**涂黑：模型看到的附件、`compare` / `verify` / `wait_for stable` 背后的帧签名、以及 OCR 读的那张 PNG，在那个位置统统是纯黑。被遮罩的截图会在文字里说明（`N privacy-masked regions are blacked out`），模型知道那里为什么看不见；调用里传 `mask: null` 也关不掉——runtime 在每张截图必经的那个入口统一注入。
+
+```yaml
+maskRegions:
+  - { x: 0, y: 1180, width: 2560, height: 120 }   # 例如密码管理器横条
+```
+
+适合遮住通知弹窗、聊天侧栏、开着秘密的终端，或任何你希望 agent 工作时留在屏幕上的窗口。它遮的是**模型**看到的像素，不阻止 agent 往遮罩区域里点击或输入。
+
 ### 它不保护什么
 
 这一点必须对用户讲清楚：
