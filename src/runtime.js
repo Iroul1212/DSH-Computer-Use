@@ -759,7 +759,15 @@ export class ComputerRuntime {
       // Identity of what the model is looking at, so an action can be refused if
       // the world changed between the observation and the click.
       foreground: result.foreground ?? null,
-      window: options.hwnd ? { hwnd: options.hwnd, bounds: { ...result.capture }, pid: result.window?.pid ?? null } : null,
+      window: options.hwnd
+        ? {
+          hwnd: options.hwnd,
+          bounds: { ...result.capture },
+          pid: result.window?.pid ?? result.foreground?.pid ?? null,
+          title: result.window?.title ?? null,
+          process: result.window?.process ?? null,
+        }
+        : null,
     }
     this.lastView = view
     const attached = options.attach === false

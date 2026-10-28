@@ -875,6 +875,7 @@ function Invoke-Cmd-Screenshot($a) {
             hwnd = [int64]$hwnd
             pid  = (Get-WindowProcessId ([IntPtr][int64]$hwnd))
             title = (Get-WindowTitle ([IntPtr][int64]$hwnd))
+            process = (Get-WindowProcessName ([IntPtr][int64]$hwnd))
         }
     }
     if ($null -ne $fallback) { $result['fallback'] = $fallback }
@@ -1232,6 +1233,24 @@ function Get-WindowTitle {
         [void][DshWin32]::GetWindowTextW($Hwnd, $sb, $sb.Capacity)
         return $sb.ToString()
     } catch { return '' }
+}
+
+# pid -> process name. Get-Process is ~100ms on a cold call and this helper is
+# used by every window screenshot, so the answer is cached for the process lifetime.
+$script:ProcNameCache = @{}
+
+function Get-WindowProcessName {
+    param([IntPtr]$Hwnd)
+    try {
+        $procId = Get-WindowProcessId $Hwnd
+        if ($procId -le 0) { return $null }
+        if ($script:ProcNameCache.ContainsKey($procId)) { return $script:ProcNameCache[$procId] }
+        $p = Get-Process -Id $procId -ErrorAction SilentlyContinue
+        $name = $null
+        if ($null -ne $p) { $name = $p.ProcessName }
+        $script:ProcNameCache[$procId] = $name
+        return $name
+    } catch { return $null }
 }
 
 function Get-WindowClass {
@@ -1868,6 +1887,23 @@ $cur0 = Get-CursorPos
 # Warm up the foreground-window record path (function JIT + first .NET Process lookup,
 # ~30ms one-off) so a later screenshot does not pay it inside result.foreground.
 try { $null = Get-ForegroundWindowInfo } catch { Write-Host-Log ("foreground warm-up failed: " + $_.Exception.Message) }
+
+# Warm the screenshot path too: the first capture pays PowerShell's one-off JIT for
+# the frame signature (resize + LockBits) and the C# diff, which is ~500ms - far
+# more than a capture should ever cost. Doing it on a throwaway 64x64 bitmap here
+# moves that cost into boot where nobody is timing it.
+try {
+    $warmBmp = New-Object System.Drawing.Bitmap 320, 200
+    try {
+        $null = Get-FrameSignature $warmBmp 256
+        $zero = New-Object byte[] 64
+        $null = [DshFrameDiff.Diff]::Compare($zero, $zero, 4, 4, 16)
+        # The image encoders load lazily on the first Save(); a cold JPEG encode
+        # costs ~200ms, so pay it here instead of on the first screenshot.
+        $null = Get-BitmapBytes $warmBmp 'jpeg' 70
+        $null = Get-BitmapBytes $warmBmp 'png' 70
+    } finally { $warmBmp.Dispose() }
+} catch { Write-Host-Log ("screenshot warm-up failed: " + $_.Exception.Message) }
 
 $boot = [ordered]@{
     os        = [System.Environment]::OSVersion.VersionString
