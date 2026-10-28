@@ -2,8 +2,9 @@
 // (grid / mark / dim), the frame diff behind `compare` / `verify`, and the
 // pointer verification that stops a click from landing silently off-target.
 //
-// Side effects: captures a window it does not own, and moves the pointer once
-// (restored at the end). Nothing is clicked and nothing is typed.
+// Side effects: captures a window it does not own, moves the pointer once
+// (restored afterwards), and - only in the optional last section - types into a
+// notepad it launches itself and closes again.
 //
 // Run: node test/observe-selftest.mjs
 
@@ -116,6 +117,42 @@ async function main() {
         code + ': ' + String(err.message).slice(0, 120))
     }
     try { await host.call('move', { x: before.x, y: before.y, durationMs: 30 }) } catch { /* pointer may be captured */ }
+
+    // 7. the whole loop on a real app: act, then let the plugin say whether the
+    //    screen actually changed. This is the product promise, so it is tested
+    //    against a notepad we launch and kill ourselves.
+    const { spawn } = await import('node:child_process')
+    const child = spawn('notepad.exe', [], { detached: true, stdio: 'ignore' })
+    child.unref()
+    try {
+      await new Promise((r) => setTimeout(r, 1500))
+      const listed = await host.call('windows', {})
+      const pad = (listed.windows ?? []).find((w) => /notepad/i.test(String(w.process ?? '')) && (w.bounds?.width ?? 0) > 200)
+      if (!pad) {
+        skip('type then verify reports a change', 'could not launch notepad')
+      } else {
+        const shot = await host.call('screenshot', { hwnd: pad.hwnd, maxWidth: 800 })
+        const box = shot.capture
+        await host.call('focus', { hwnd: pad.hwnd })
+        await host.call('click', { x: box.x + Math.round(box.width * 0.4), y: box.y + Math.round(box.height * 0.4) })
+        await host.call('type', { text: 'dsh verify 你好' })
+        await new Promise((r) => setTimeout(r, 350))
+        const typed = await host.call('screenshot', { hwnd: pad.hwnd, maxWidth: 800, compare: true })
+        const changed = typed.image?.change ?? {}
+        check('type then verify reports a change',
+          changed.comparable === true && changed.changed === true && changed.ratio > 0.002,
+          'changed=' + changed.changed + ' ratio=' + changed.ratio + ' bounds=' + JSON.stringify(changed.bounds))
+
+        await new Promise((r) => setTimeout(r, 300))
+        const idle = await host.call('screenshot', { hwnd: pad.hwnd, maxWidth: 800, compare: true })
+        const idleChange = idle.image?.change ?? {}
+        check('a settled window reports no change',
+          idleChange.comparable === true && idleChange.changed === false,
+          'changed=' + idleChange.changed + ' ratio=' + idleChange.ratio)
+      }
+    } finally {
+      try { spawn('taskkill', ['/IM', 'notepad.exe', '/F'], { stdio: 'ignore' }) } catch { /* ignore */ }
+    }
   } finally {
     await host.close()
   }

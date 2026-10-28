@@ -154,16 +154,6 @@ function stamp() {
 
 
 /** Depth-first search over a UI Automation outline. */
-function similarFrame(a, b) {
-  if (typeof a !== 'string' || typeof b !== 'string') return false
-  if (Math.abs(a.length - b.length) > Math.max(64, a.length * 0.05)) return false
-  const n = Math.min(a.length, b.length)
-  let diff = 0
-  let sampled = 0
-  for (let i = 0; i < n; i += 89) { sampled += 1; if (a[i] !== b[i]) diff += 1 }
-  return sampled > 0 && diff / sampled < 0.02
-}
-
 function findNode(node, predicate) {
   if (!node) return undefined
   if (predicate(node)) return node
@@ -255,8 +245,12 @@ export class ComputerRuntime {
     const timeoutMs = Math.min(600000, Math.max(100, Number(options.timeoutMs ?? 8000)))
     const intervalMs = Math.min(5000, Math.max(50, Number(options.intervalMs ?? 250)))
     const stableMs = Math.min(60000, Math.max(0, Number(options.stableMs ?? 600)))
+    // A desktop is almost never byte-identical twice (a caret blinks, a clock
+    // ticks, a spinner spins), so "stable" is measured as "barely moved" on the
+    // same down-sampled frame signature the verify path uses.
+    const stableRatio = Math.min(1, Math.max(0, Number(options.ratio ?? 0.002)))
     const started = Date.now()
-    let lastFrame = null
+    let lastRatio = null
     let stableHwnd
     let stableSince = null
     let frames = 0
@@ -265,13 +259,13 @@ export class ComputerRuntime {
       frames += 1
       if (kind === 'stable') {
         if (stableHwnd === undefined) { const listed = await this.call('windows', {}); stableHwnd = (listed.windows ?? []).find((win) => win.foreground === true)?.hwnd ?? null }
-        const shot = await this.call('screenshot', { hwnd: options.hwnd ?? stableHwnd, maxWidth: 480, format: 'jpeg', quality: 55 }, { timeoutMs: this.config.screenshotTimeoutMs })
-        const body = shot.image.base64
-        const frame = body
-        if (lastFrame !== null && similarFrame(frame, lastFrame)) {
+        const shot = await this.call('screenshot', { hwnd: options.hwnd ?? stableHwnd, maxWidth: 480, format: 'jpeg', quality: 55, compare: true }, { timeoutMs: this.config.screenshotTimeoutMs })
+        const change = shot.image?.change
+        lastRatio = change?.comparable === true ? Number(change.ratio) || 0 : null
+        if (lastRatio !== null && lastRatio <= stableRatio) {
           stableSince ??= Date.now()
-          if (Date.now() - stableSince >= stableMs) return { ok: true, kind, waitedMs: Date.now() - started, frames }
-        } else { stableSince = null; lastFrame = frame }
+          if (Date.now() - stableSince >= stableMs) return { ok: true, kind, waitedMs: Date.now() - started, frames, ratio: lastRatio }
+        } else { stableSince = null }
       } else if (kind === 'window') {
         const listed = await this.call('windows', { filter: options.titleMatch ?? '' })
         const target = String(options.titleMatch ?? '').toLowerCase()
@@ -292,7 +286,10 @@ export class ComputerRuntime {
       }
       await new Promise((resolve) => setTimeout(resolve, intervalMs))
     }
-    return { ok: false, kind, waitedMs: Date.now() - started, error: { code: 'WAIT_TIMEOUT', message: 'Nothing matched within ' + timeoutMs + 'ms' } }
+    const hint = kind === 'stable' && lastRatio !== null && lastRatio > stableRatio
+      ? ' The screen keeps changing (' + (lastRatio * 100).toFixed(1) + '% of sampled pixels between frames), so something on it is animating: wait for a specific element or text instead, or raise the timeout.'
+      : ''
+    return { ok: false, kind, waitedMs: Date.now() - started, frames, ratio: lastRatio, error: { code: 'WAIT_TIMEOUT', message: 'Nothing matched within ' + timeoutMs + 'ms.' + hint } }
   }
   /** @returns {string} directory screenshot spill files land in. */
   screenshotDir() {

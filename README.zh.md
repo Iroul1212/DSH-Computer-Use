@@ -141,6 +141,8 @@ pwsh -NoProfile -File scripts\uninstall.ps1 -Profile web
 | `type` | **mutating** | `text` | 实际输入的 `chars`（UTF-16 code unit 数；一个 emoji 记 2） |
 | `key` | **mutating** | `keys` | 被按下的键 |
 | `wait` | 中性 | `seconds`（0–30，默认 1） | 文本 |
+| `ocr` | 读 | `hwnd`、`region`、`lang`、`maxLines` | 识别出的 `lines[]`（`text` + 物理像素 `bounds`）、`lang`、`engine`、`elapsedMs` |
+| `wait_for` | 读 | `waitKind`（`stable` / `window` / `element` / `text`）、`timeoutMs`、`stableMs`、`hwnd`、`titleMatch`、`name`、`text`、`lang` | `wait`（`kind`、`waitedMs`、`frames`、`ratio`），超时则 `WAIT_TIMEOUT` 并说明是什么一直在动 |
 | `resume` | 控制 | — | 清除 Esc 急停；没被触发时只回一句"无事可恢复" |
 
 `x`/`y` 的坐标系永远是**本工具上一次返回的那张截图**的像素空间；省略它们表示在当前指针位置操作。把配置里的 `coordinates` 设为 `physical` 则改为直接给物理屏幕像素。

@@ -49,3 +49,41 @@
 2. `wait_for stable` 用现成的帧签名实现（"画面不动了"比 sleep 可靠）。
 3. 敏感区域脱敏（截图前对配置的区域打码）。
 4. `npm publish` + `dsh plugin add dsh-computer-use` 一行装。
+
+---
+
+## 6. 有真实桌面之后又修的三处（游戏退出后测试暴露）
+
+上一轮测试是在「全屏游戏抓着鼠标」的机器上跑的，很多输入路径只能 SKIP。
+游戏退出后重跑，`npm test` 从「有 SKIP」变成「全绿」，同时暴露出三个真问题：
+
+### 6.1 `wait_for stable` 在真实窗口上永远不成立
+
+旧实现比较两张截图的 **JPEG 字节是否相同**。真实窗口几乎永远不会有两次完全相同的字节——
+记事本光标闪烁就足够让 `stable` 永远超时（实测 8s 超时）。
+现在改为复用 `compare` 的帧签名：**采样像素差异 ≤ 0.2%** 就算「安静」，并要求连续安静 `stableMs`。
+记事本实测 4 帧 / 约 1.0s 收敛。超时信息也会带上最后一次的 ratio 并建议改用 element/text 等待。
+
+### 6.2 `verify` / `observe` 比对错了目标
+
+`afterAction` 里第二次截图**没带 hwnd**，于是「上一步看的是某个窗口、这一步比的是整个屏幕」，
+必然 `comparable: false`（模型看到「无法比较」，功能等于没有）。
+现在 `afterAction` 会沿用 `runtime.lastView.window.hwnd`，和目标保持一致；
+截图 view 也和模型刚看过的那张对齐。
+
+### 6.3 「变化」阈值太低 + 指针回执没传上去
+
+- 光标闪烁在 256 宽采样里约 0.15%，旧的 0.05% 阈值会把它判成「画面变了」。
+  阈值改为 **0.2%**：光标/转圈不算变化，菜单弹出、出现文字（实测 2.9%~4.5%）照常判为变化。
+- host 层的 `pointer` 回执没有透到 tool 返回值（文档写了、模型看不到）。现在
+  `move / click / drag / scroll` 的返回值里都带 `pointer: {x,y,requestedX,requestedY,drift,landed}`。
+
+### 6.4 新增的真实闭环回归用例
+
+`test/observe-selftest.mjs` 追加两问（自己起 notepad、自己关掉）：
+
+- `type` 后 `compare` → `changed=true, ratio≈2.9%, bounds` 覆盖文本区；
+- 静置 300ms 后再 `compare` → `changed=false, ratio≈0.04%`。
+
+实测 `npm test`：schema 5/5、plugin 13、skills 15、safety 11、ocr+wait_for 5、
+observe 10 checks、smoke 11 PASS —— **0 FAIL / 0 SKIP**。

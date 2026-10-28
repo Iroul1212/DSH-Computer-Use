@@ -165,7 +165,9 @@ function Get-FrameChange($bmp, $a) {
     }
     return [ordered]@{
       comparable = $true
-      changed = ($ratio -gt 0.0005)
+      # 0.2% of the sample: above a blinking caret or a spinning cursor, well
+      # below a real UI change (a menu opening, a character appearing).
+      changed = ($ratio -gt 0.002)
       ratio = $ratio
       bounds = $bounds
       sample = $sample

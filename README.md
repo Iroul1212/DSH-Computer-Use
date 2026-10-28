@@ -141,7 +141,11 @@ Every tool returns one canonical JSON object. `output.render` turns it into `[te
 | `type` | **mutating** | `text` | `chars` typed (UTF-16 code units; one emoji counts as 2) |
 | `key` | **mutating** | `keys` | the keys that were pressed |
 | `wait` | neutral | `seconds` (0–30, default 1) | text |
+| `ocr` | read | `hwnd`, `region`, `lang`, `maxLines` | recognised `lines[]` (`text` + `bounds` in physical pixels), `lang`, `engine`, `elapsedMs` |
+| `wait_for` | read | `waitKind` (`stable` / `window` / `element` / `text`), `timeoutMs`, `stableMs`, `hwnd`, `titleMatch`, `name`, `text`, `lang` | `wait` (`kind`, `waitedMs`, `frames`, `ratio`) or `WAIT_TIMEOUT` with a hint about what kept changing |
 | `resume` | control | — | clears the Esc kill switch; no-op text when nothing is tripped |
+
+`wait_for stable` does not ask for two byte-identical screenshots - a blinking caret would defeat that. It reuses the frame signature behind `compare` and accepts a frame as quiet when under 0.2% of sampled pixels moved, so "the window has settled" works on real desktops.
 
 Prefix `x`/`y` with nothing: they are always read in the pixel space of the **last screenshot this tool returned**. Omit them to act at the current pointer position. `coordinates: physical` in the config switches them to physical screen pixels.
 

@@ -222,7 +222,7 @@ export function createComputerTool(runtime, config) {
           const target = runtime.toPhysical(args.x, args.y)
           if (gate.dryRun) return { action, ok: true, dryRun: true, text: `[dry run] Would move the pointer to physical (${target.x},${target.y}).` }
           const result = await runtime.call('move', { x: target.x, y: target.y, durationMs: 120 })
-          return await afterAction(runtime, args, action, `Moved the pointer to image (${args.x},${args.y}) = physical (${result.x},${result.y}).`)
+          return await afterAction(runtime, args, action, `Moved the pointer to image (${args.x},${args.y}) = physical (${result.x},${result.y}).`, { pointer: result.pointer ?? null })
         }
         case 'click':
         case 'double_click':
@@ -235,7 +235,7 @@ export function createComputerTool(runtime, config) {
           const gate = await runtime.beforeMutation('computer', `${action} ${button} on ${where}`)
           if (gate.dryRun) return { action, ok: true, dryRun: true, text: `[dry run] Would ${action} ${button} on ${where}.` }
           const result = await runtime.call('click', { x: target.x, y: target.y, button, count, modifiers: args.modifiers ?? [] })
-          return await afterAction(runtime, args, action, `${action === 'click' ? 'Clicked' : action.replace('_', ' ')} ${button}${count > 1 ? ` x${count}` : ''} at image (${args.x ?? '-'},${args.y ?? '-'}) = physical (${result.x},${result.y}).`)
+          return await afterAction(runtime, args, action, `${action === 'click' ? 'Clicked' : action.replace('_', ' ')} ${button}${count > 1 ? ` x${count}` : ''} at image (${args.x ?? '-'},${args.y ?? '-'}) = physical (${result.x},${result.y}).`, { pointer: result.pointer ?? null })
         }
         case 'drag': {
           const from = runtime.toPhysical(args.x, args.y)
@@ -244,7 +244,7 @@ export function createComputerTool(runtime, config) {
           const gate = await runtime.beforeMutation('computer', `drag from physical (${from.x},${from.y}) to (${to.x},${to.y})`)
           if (gate.dryRun) return { action, ok: true, dryRun: true, text: `[dry run] Would drag from physical (${from.x},${from.y}) to (${to.x},${to.y}).` }
           const result = await runtime.call('drag', { from, to, button: args.button ?? 'left', durationMs: 350, modifiers: args.modifiers ?? [] })
-          return await afterAction(runtime, args, action, `Dragged from physical (${result.from.x},${result.from.y}) to (${result.to.x},${result.to.y}).`)
+          return await afterAction(runtime, args, action, `Dragged from physical (${result.from.x},${result.from.y}) to (${result.to.x},${result.to.y}).`, { pointer: result.pointer ?? null })
         }
         case 'scroll': {
           const target = runtime.toPhysical(args.x, args.y)
@@ -254,7 +254,7 @@ export function createComputerTool(runtime, config) {
           const gate = await runtime.beforeMutation('computer', `scroll dy=${dy} dx=${dx} at physical (${target.x ?? 'cursor'},${target.y ?? 'cursor'})`)
           if (gate.dryRun) return { action, ok: true, dryRun: true, text: `[dry run] Would scroll dy=${dy} dx=${dx}.` }
           const result = await runtime.call('scroll', { x: target.x, y: target.y, dy: dy * 120, dx: dx * 120, modifiers: args.modifiers ?? [] })
-          return await afterAction(runtime, args, action, `Scrolled dy=${dy} dx=${dx} notches at physical (${result.x},${result.y}).`)
+          return await afterAction(runtime, args, action, `Scrolled dy=${dy} dx=${dx} notches at physical (${result.x},${result.y}).`, { pointer: result.pointer ?? null })
         }
         case 'type': {
           const text = args.text
@@ -331,26 +331,32 @@ export function createComputerTool(runtime, config) {
  * @param text - what happened, in one line.
  * @returns the canonical value.
  */
-async function afterAction(runtime, args, action, text) {
+async function afterAction(runtime, args, action, text, extra = null) {
+  const receipt = extra && typeof extra === 'object' ? { ...extra } : {}
   const delay = runtime.config.actionDelayMs ?? 0
   if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay))
 
+  // Compare against the SAME target the model was last looking at: a window
+  // capture diffed against a full-screen capture (or vice versa) is meaningless
+  // and would always answer "no previous frame".
+  const target = runtime.lastView?.window?.hwnd ?? null
+
   // observe: the model wants to look at the result, so pay for the pixels.
   if (config_wantsObserve(args)) {
-    const shot = await runtime.capture({ compare: true })
+    const shot = await runtime.capture({ hwnd: target, compare: true })
     const verdict = describeChange(shot.change).join('\n')
-    return { ...shot, action, ok: true, text: `${text}\n${verdict}\nFresh screenshot attached.` }
+    return { ...receipt, ...shot, action, ok: true, text: `${text}\n${verdict}\nFresh screenshot attached.` }
   }
 
   // verify: the model only wants the verdict, so skip the attachment, the UI
   // outline and the image encoding that make an observe round trip expensive.
   if (config_wantsVerify(args)) {
-    const shot = await runtime.capture({ compare: true, attach: false, uiSummary: 'none' })
+    const shot = await runtime.capture({ hwnd: target, compare: true, attach: false, uiSummary: 'none' })
     const verdict = describeChange(shot.change).join('\n')
-    return { action, ok: true, change: shot.change, view: shot.view, cursor: shot.cursor, text: `${text}\n${verdict}` }
+    return { ...receipt, action, ok: true, change: shot.change, view: shot.view, cursor: shot.cursor, text: `${text}\n${verdict}` }
   }
 
-  return { action, ok: true, text }
+  return { ...receipt, action, ok: true, text }
 }
 
 /**
