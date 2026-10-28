@@ -1,13 +1,17 @@
 {
   "name": "dsh-computer-use",
-  "version": "0.1.0",
-  "description": "Codex-style computer use for DeepSeek Harness: screenshot, mouse, keyboard, window and UI Automation control of a real Windows desktop, with a visible overlay and an Esc kill switch.",
+  "version": "0.2.0",
+  "description": "Codex-style computer use for DeepSeek Harness on Windows: screenshot, mouse, keyboard, window and UI Automation control of a real desktop, with fuzzy control search, post-action verification, a privacy mask, a visible overlay and an Esc kill switch.",
   "keywords": [
     "dsh-plugin",
     "computer-use",
     "windows",
     "uiautomation",
-    "screenshot"
+    "screenshot",
+    "screen-control",
+    "ocr",
+    "accessibility",
+    "desktop-automation"
   ],
   "license": "MIT",
   "type": "module",
@@ -45,6 +49,12 @@
     "inspect": "node test/inspect.mjs",
     "test:observe": "node test/observe-selftest.mjs",
     "test:match": "node test/match-selftest.mjs",
-    "test:mask": "node test/mask-selftest.mjs"
+    "test:mask": "node test/mask-selftest.mjs",
+    "pack:check": "node scripts/package-check.mjs",
+    "prepack": "node test/schema-contract.mjs && node test/match-selftest.mjs",
+    "release": "npm run pack:check && npm publish --access public"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

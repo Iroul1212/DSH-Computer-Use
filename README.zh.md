@@ -67,6 +67,22 @@ npx @deepseek-ai/dsh --profile web --dump-config
 node test\plugin-selftest.mjs
 ```
 
+**其他安装来源，同样一行。**
+
+```powershell
+# 自己打的 tarball（npm run pack:check 会顺手打一个并校验）
+npm run pack:check
+npx @deepseek-ai/dsh plugin --profile web add "C:\path\dsh-computer-use-0.2.0.tgz"
+
+# 直接从 git
+npx @deepseek-ai/dsh plugin --profile web add "github:<owner>/dsh-computer-use#v0.2.0"
+
+# 发布到你自己的 npm 名字之后（见下面的「发布」）
+npx @deepseek-ai/dsh plugin --profile web add "<your-name>"
+```
+
+> npm 上的 `dsh-computer-use` 已被一个无关的包占用，所以本仓库不用这个名字发布。上面每一种方式都是按包内的模块名解析的，其余步骤完全一样。
+
 **4. 卸载。**
 
 ```powershell
@@ -516,6 +532,19 @@ npm run smoke                 # Windows 宿主 11 步端到端（截图 / 中文
 
 - **`resume` 是模型可以调用的动作。** Esc 之后，模型必须等人类明确要求才能 resume；实现里的 5 秒冷却只是减速带，不是保证 —— 它挡不住一个不听话的模型。要硬停就直接关掉 DSH 会话，或者停用插件（`- id: computer-use` 加 `disabled: true`）／卸载插件。
 - **技能就是你磁盘上的纯 markdown，而模型可以自己写。** 这正是设计意图（一次成功的操作沉淀成配方），但也意味着错误或过度泛化的经验会被写进去、然后在之后的活儿里被默默套用。用户层只是 `$DSH_HOME\computer-use-skills` 下的文件：删掉某个文件，或者调 `app_skill` 的 `remove`，内置技能（或之前的行为）就回来了。
+
+## 发布
+
+`npm run pack:check` 是发布闸门：它打出 `npm publish` 会真正上传的那个 tarball，逐项断言 manifest、所有运行时脚本、两个 README、内置技能都在包里，并把包解压到别处 import 入口，证明解包后仍能启动。它还会在 `cordis.patch.yml` 的 `name:` 与 `package.json` 的 `name` 不一致时直接失败——这一对名字决定了 `dsh plugin add` 能不能解析到模块。
+
+```powershell
+npm pkg set name=dsh-computer-use-<yourhandle>   # 或 @yourscope/dsh-computer-use
+npm login
+npm run release                                   # 先 pack:check，再 npm publish --access public
+npx @deepseek-ai/dsh plugin --profile web add "<同一个名字>"
+```
+
+`prepack` 会跑两个离线套件（schema 契约 + 匹配器），所以工具定义写坏了不可能被误发布。
 
 ## Development（开发）
 

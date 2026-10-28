@@ -67,6 +67,22 @@ The output is the composed tree with `# ==` provenance comments; it must contain
 node test\plugin-selftest.mjs
 ```
 
+**Other sources, same one line.**
+
+```powershell
+# a tarball you built yourself (npm run pack:check builds and validates one)
+npm run pack:check
+npx @deepseek-ai/dsh plugin --profile web add "C:\path\dsh-computer-use-0.2.0.tgz"
+
+# straight from git
+npx @deepseek-ai/dsh plugin --profile web add "github:<owner>/dsh-computer-use#v0.2.0"
+
+# from npm, once you publish it under a name you own (see Publishing)
+npx @deepseek-ai/dsh plugin --profile web add "<your-name>"
+```
+
+> The npm name `dsh-computer-use` is already taken by an unrelated package, so this repository does not publish under it. Every option above resolves the module by the name inside the package, so nothing else changes.
+
 **4. Uninstall.**
 
 ```powershell
@@ -518,6 +534,19 @@ npm run smoke                 # 11-step end-to-end exercise of the Windows host 
 
 - **`resume` is a model-callable action.** After an Esc the model is expected to wait until the human explicitly asks it to continue; the 5 second cooldown is a speed bump, not a guarantee, and nothing stops a model that ignores the instruction. For a hard stop, close the DSH session, or disable the plugin (`- id: computer-use` with `disabled: true`) or uninstall it.
 - **Skills are plain markdown on your disk, and the model can write them.** That is the point — a successful run becomes a recipe — but it also means a wrong or over-general recipe can be saved and then quietly applied to later work. The user layer is just files under `$DSH_HOME\computer-use-skills`: delete one, or call `app_skill` with `remove`, and the built-in (or the previous behaviour) comes back.
+
+## Publishing
+
+`npm run pack:check` is the gate: it builds the exact tarball `npm publish` would upload, asserts the manifest, every runtime script, both READMEs and the built-in skills are inside it, and imports the packed entry from an unpacked copy to prove it still boots. It also fails loudly if `cordis.patch.yml`'s `name:` drifts from `package.json`'s `name`, because that pair is what makes `dsh plugin add` resolvable.
+
+```powershell
+npm pkg set name=dsh-computer-use-<yourhandle>   # or @yourscope/dsh-computer-use
+npm login
+npm run release                                   # pack:check, then npm publish --access public
+npx @deepseek-ai/dsh plugin --profile web add "<the same name>"
+```
+
+`prepack` runs the two offline suites (schema contract + matcher), so a broken tool definition cannot be published by accident.
 
 ## Development
 
