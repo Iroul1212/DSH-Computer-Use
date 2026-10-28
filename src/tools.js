@@ -150,6 +150,17 @@ export function createComputerTool(runtime, config) {
         enum: ['none', 'summary', 'tree'],
         description: 'Screenshot: how much UI Automation detail to include as text alongside the image. Use "tree" when the image is hard to read or when you need exact element names.',
       },
+      waitKind: {
+        type: 'string',
+        enum: ['stable', 'window', 'element', 'text'],
+        description: 'action `wait_for`: what to wait for. `stable` = the window stops changing (frame-diff based, so a blinking caret does not defeat it); `window` = a window matching `titleMatch`; `element` = a control matching `name`; `text` = OCR-visible text matching `text`.',
+      },
+      timeoutMs: { type: 'integer', description: 'action `wait_for`: give up after this many milliseconds (100-600000, default 8000).' },
+      stableMs: { type: 'integer', description: 'action `wait_for` kind `stable`: how long the window must stay quiet before it returns (default 600ms).' },
+      titleMatch: { type: 'string', description: 'action `wait_for` kind `window`: case-insensitive substring of the window title or process name.' },
+      name: { type: 'string', description: 'action `wait_for` kind `element`: case-insensitive substring of a control name or automationId.' },
+      lang: { type: 'string', description: 'action `ocr` / `wait_for` kind `text`: OCR language tag such as "zh-Hans-CN" or "en-US"; defaults to the deployment setting.' },
+      maxLines: { type: 'integer', description: 'action `ocr`: cap how many recognised lines are returned (1-2000).' },
       grid: {
         type: 'boolean',
         description: 'Screenshot: draw a labelled coordinate grid over the image. Labels are image-space coordinates, so a number read off the grid can be passed straight back to click/move.',
@@ -297,10 +308,11 @@ export function createComputerTool(runtime, config) {
           return { action, ok: true, text: text.join('\n'), lines: seen.lines, lang: seen.lang, engine: seen.engine }
         }
         case 'wait_for': {
-          const waited = await runtime.waitFor({ kind: args.waitKind, timeoutMs: args.timeoutMs, titleMatch: args.titleMatch, name: args.name, text: args.text, hwnd: args.hwnd, lang: args.lang })
+          const waited = await runtime.waitFor({ kind: args.waitKind, timeoutMs: args.timeoutMs, stableMs: args.stableMs, titleMatch: args.titleMatch, name: args.name, text: args.text, hwnd: args.hwnd, lang: args.lang })
           if (waited.ok !== true) throw new ToolError(waited.error?.code ?? 'WAIT_TIMEOUT', (waited.error?.message ?? 'The wait did not match') + ' (kind ' + waited.kind + ', waited ' + waited.waitedMs + 'ms). Take a screenshot to see the current state.')
           const what = waited.window ? ' window "' + waited.window.title + '"' : waited.element ? ' element ' + waited.element.role + ' "' + waited.element.name + '" path=' + waited.element.path : waited.line ? ' text "' + waited.line.text + '"' : ''
-          return { action, ok: true, text: 'Waited ' + waited.waitedMs + 'ms for ' + waited.kind + what + ' (' + waited.frames + ' checks).', wait: waited }
+          const quiet = typeof waited.ratio === 'number' ? ' The frame was quiet to ' + (waited.ratio * 100).toFixed(2) + '% of sampled pixels.' : ''
+          return { action, ok: true, text: 'Waited ' + waited.waitedMs + 'ms for ' + waited.kind + what + ' (' + waited.frames + ' checks).' + quiet, wait: waited }
         }        case 'status': {
           const guard = await runtime.guardStatus()
           return {
