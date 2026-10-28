@@ -399,7 +399,7 @@ function Send-InputArray {
 
 function New-MouseInput {
     param([uint32]$Flags, [int]$Dx = 0, [int]$Dy = 0, [uint32]$Data = 0)
-    $mi = New-Object 'DshWin32+MOUSEINPUT'
+    $mi = [DshWin32+MOUSEINPUT]@{ dx = $Dx; dy = $Dy; mouseData = $Data; dwFlags = $Flags; time = [uint32]0; dwExtraInfo = [IntPtr]::Zero }
     $mi.dx = $Dx
     $mi.dy = $Dy
     $mi.mouseData = $Data
@@ -408,7 +408,7 @@ function New-MouseInput {
     $mi.dwExtraInfo = [IntPtr]::Zero
     $inp = New-Object 'DshWin32+INPUT'
     $inp.type = [uint32]0        # INPUT_MOUSE
-    $inp.mi = $mi
+    $inp = [DshWin32+INPUT]@{ type = [uint32]0; mi = $mi }
     return $inp
 }
 
@@ -422,7 +422,7 @@ function New-KeyInput {
     $ki.dwExtraInfo = [IntPtr]::Zero
     $inp = New-Object 'DshWin32+INPUT'
     $inp.type = [uint32]1        # INPUT_KEYBOARD
-    $inp.ki = $ki
+    $inp = [DshWin32+INPUT]@{ type = [uint32]1; ki = $ki }
     return $inp
 }
 
@@ -1827,4 +1827,6 @@ while ($true) {
 Write-Host-Log ("exiting after " + $script:RequestCount + " request(s)")
         timings = [ordered]@{ captureMs = $msCapture; transformMs = ($msTransform - $msCapture); encodeMs = ($msEncode - $msTransform) }
 exit 0
+
+
 
