@@ -215,10 +215,21 @@ Every capture refreshes one small signature of its target, so the screenshot the
 
 ### `ui_element` — Windows UI Automation
 
+`find` accepts a **description**, not an exact name: `{ action: "find", description: "保存" }` ranks every control in the window by name, automationId, value, role and help text, returns the best few with a score and a one-line reason, and draws them **1..N on a screenshot** so a vision model can pick the right one. The matcher is CJK-aware (bigrams, so "保存" hits "保存并关闭"), ignores punctuation and full-width differences, demotes disabled and scrolled-out controls, and understands kind words ("保存按钮" prefers a Button).
+
+```jsonc
+{ "action": "find", "description": "the search box", "limit": 3 }
+// 1. Group "FileExplorerSearchBox" path=0/2/0/5 score=0.77 - automationId contains the query; image=(789,56)
+// 2. ...
+// -> act on it by path, or click the image coordinates; pin numbers match this list
+```
+
+Pass `nameContains` instead when you want an exact substring filter over every hit (up to 20).
+
 | action | Kind | Parameters | Returns |
 |---|---|---|---|
 | `tree` | read | `hwnd`, `maxDepth`, `maxNodes` | indented outline, every line ending in `path=0/2/1`; `nodes`, `truncated` |
-| `find` | read | `nameContains`, `role`, `hwnd` | up to 20 `matches[]` (`path`, `role`, `name`, `value`, `automationId`, `bounds`, `enabled`, `offscreen`), `found` |
+| `find` | read | `description`, `nameContains`, `role`, `hwnd`, `limit`, `annotate` | ranked `candidates[]` (`path`, `role`, `name`, `value`, `automationId`, `bounds`, `center`, `image`, `score`, `why`), `found`, plus an annotated screenshot when `annotate` is on (default) |
 | `invoke` | **mutating** | `path` | `path`, `hwnd`, `result` (bounds) |
 | `set_value` | **mutating** | `path`, `value` | same shape |
 | `focus` | **mutating** | `path` | same shape |

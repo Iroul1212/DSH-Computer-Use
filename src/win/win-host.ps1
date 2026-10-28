@@ -820,7 +820,7 @@ function Invoke-Cmd-Screenshot($a) {
         # Diff against the previous capture BEFORE drawing on this one: the grid
         # and the markers would otherwise be counted as "the screen changed".
         $change = Get-FrameChange $bmp $a
-        $decorated = Add-ScreenshotDecorations $bmp $a
+        $decorated = Add-ScreenshotDecorations $bmp $a $capture
         $bytes = Get-BitmapBytes $bmp $format $quality
         $msEncode = [int]$sw.ElapsedMilliseconds
     } finally {

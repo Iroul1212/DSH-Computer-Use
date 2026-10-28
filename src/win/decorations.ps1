@@ -48,11 +48,12 @@ namespace DshFrameDiff {
 }
 "@
 }
-function Add-ScreenshotDecorations($bmp, $a) {
+function Add-ScreenshotDecorations($bmp, $a, $capture = $null) {
   $grid = Test-DecFlag $a 'grid'
   $mark = Get-DecValue $a 'mark'
   $dim = Get-DecValue $a 'dim'
-  if (-not $grid -and $null -eq $mark -and $null -eq $dim) { return $false }
+  $pins = Get-DecValue $a 'pins'
+  if (-not $grid -and $null -eq $mark -and $null -eq $dim -and $null -eq $pins) { return $false }
   $g = [System.Drawing.Graphics]::FromImage($bmp)
   try {
     $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
@@ -87,6 +88,42 @@ function Add-ScreenshotDecorations($bmp, $a) {
           }
         }
       } finally { $pen.Dispose(); $font.Dispose(); $ink.Dispose(); $back.Dispose() }
+    }
+    if ($null -ne $pins) {
+      # Numbered candidate markers. Pins arrive in PHYSICAL screen pixels - the
+      # only space the UI Automation tree speaks - and are mapped onto this
+      # (possibly downscaled) image here, so the caller never needs the scale.
+      $scale = 1.0
+      if ($null -ne $capture -and [int]$capture.width -gt 0) { $scale = $bmp.Width / [double]$capture.width }
+      $originX = 0; $originY = 0
+      if ($null -ne $capture) { $originX = [int]$capture.x; $originY = [int]$capture.y }
+      $pinFont = New-Object System.Drawing.Font 'Segoe UI', 11, ([System.Drawing.FontStyle]::Bold)
+      $pinInk = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::White)
+      $pinRing = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(255, 255, 255, 255)), 2
+      try {
+        $idx = 0
+        foreach ($pin in @($pins)) {
+          if ($null -eq $pin) { continue }
+          $idx++
+          $label = [string](Get-DecValue $pin 'label')
+          if ([string]::IsNullOrEmpty($label)) { $label = [string]$idx }
+          $px = [int](Get-DecValue $pin 'x')
+          $py = [int](Get-DecValue $pin 'y')
+          $ix = [int][math]::Round(($px - $originX) * $scale)
+          $iy = [int][math]::Round(($py - $originY) * $scale)
+          if ($ix -lt 0 -or $iy -lt 0 -or $ix -ge $bmp.Width -or $iy -ge $bmp.Height) { continue }
+          $r = 15
+          $fill = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(225, 255, 90, 0))
+          try {
+            $g.FillEllipse($fill, $ix - $r, $iy - $r, $r * 2, $r * 2)
+            $g.DrawEllipse($pinRing, $ix - $r, $iy - $r, $r * 2, $r * 2)
+            $size = $g.MeasureString($label, $pinFont)
+            $g.DrawString($label, $pinFont, $pinInk, $ix - $size.Width / 2.0, $iy - $size.Height / 2.0)
+          } finally { $fill.Dispose() }
+        }
+      } finally {
+        $pinFont.Dispose(); $pinInk.Dispose(); $pinRing.Dispose()
+      }
     }
     if ($null -ne $mark) {
       $mx = [int]$mark.x; $my = [int]$mark.y

@@ -12,6 +12,7 @@
  * @module dsh-computer-use/tools
  */
 import { ToolError, describeChange } from './runtime.js'
+import { rankNodes } from './match.js'
 
 /** Canonical value schema: every tool returns one object, documented per action. */
 const OUTPUT = { type: 'object', additionalProperties: true }
@@ -699,7 +700,7 @@ export function createUiElementTool(runtime, config) {
     '',
     'Workflow: action "tree" returns the outline of a window\'s controls, each line ending in `path=0/2/1`. Then act on that path with invoke (press a button), set_value (fill a text box), focus, expand, collapse, or select.',
     '',
-    'When you only know roughly what you are looking for, use action "find" with `nameContains` (case-insensitive substring of name, value or automationId) and/or `role` (e.g. "Button", "Edit", "ListItem"): it returns up to 20 matching paths to pass to the acting actions.',
+    'When you only know roughly what you are looking for, use action "find" with `description` - plain words like "保存", "the search box", "关闭标签页". It ranks every control by name, automationId, value, role and help text (CJK-aware, tolerant of punctuation and partial words), returns the best few with a score and a one-line reason, and marks them 1..N on a screenshot you can look at. Pass `nameContains` instead when you want an exact substring filter over every hit (up to 20), and `role` to narrow either mode (e.g. "Button", "Edit", "ListItem").',
     '',
     'Paths are only valid while the window keeps that layout: if the window was resized, navigated or repopulated, or the action fails with a stale path, take action "tree" again before retrying.',
     '',
@@ -735,7 +736,10 @@ export function createUiElementTool(runtime, config) {
       },
       hwnd: { type: 'integer', description: 'Target window handle from app_window action "list". Omit for the foreground window.' },
       path: { type: 'string', description: 'Element path from `tree`/`find`, e.g. "0/2/1". Required by every acting action.' },
-      nameContains: { type: 'string', description: 'action "find": case-insensitive substring matched against each control\'s name, value and automationId.' },
+      description: { type: 'string', description: 'action "find": free-text description of the control, e.g. "保存" or "the search box". Ranked fuzzily across name, automationId, value, role and help text.' },
+      nameContains: { type: 'string', description: 'action "find": exact case-insensitive substring matched against each control\'s name, value and automationId (returns every hit, up to 20). Use `description` for fuzzy ranking instead.' },
+      limit: { type: 'integer', description: 'action "find" with `description`: how many ranked candidates to return (1-10, default 3).' },
+      annotate: { type: 'boolean', description: 'action "find": mark the candidates 1..N on a screenshot and attach it (default true). Pass false to skip the capture.' },
       role: { type: 'string', description: 'action "find": control role filter, e.g. "Button", "Edit", "MenuItem", "ListItem".' },
       value: { type: 'string', description: 'action "set_value": the exact text to put into the control.' },
       maxDepth: { type: 'integer', description: 'How deep to walk the control tree (default 8). Lower it when the tree is huge.' },
@@ -745,7 +749,7 @@ export function createUiElementTool(runtime, config) {
     output: { schema: OUTPUT, render: (_args, value) => renderValue(value) },
     timeoutMs: 120000,
     presentCall: (args) => {
-      const target = args.path ?? args.nameContains ?? (args.hwnd != null ? `hwnd=${args.hwnd}` : undefined)
+      const target = args.path ?? args.description ?? args.nameContains ?? (args.hwnd != null ? `hwnd=${args.hwnd}` : undefined)
       return {
         card: 'generic',
         title: `ui_element: ${args.action ?? 'action'}${target ? ` ${JSON.stringify(String(target).slice(0, 60))}` : ''}`,
@@ -768,6 +772,9 @@ export function createUiElementTool(runtime, config) {
         })
         const nodes = Number(tree?.nodes ?? 0)
         const hostTruncated = tree?.truncated === true
+        const targetHwnd = tree?.hwnd ?? hwnd
+        const where = targetHwnd === null ? 'the foreground window' : `hwnd=${targetHwnd}`
+
         if (action === 'tree') {
           const clip = clipOutline(formatUiTree(tree, 400), 200, 12000)
           const truncated = hostTruncated || clip.cut
@@ -775,65 +782,142 @@ export function createUiElementTool(runtime, config) {
             action,
             ok: true,
             text: `${clip.text}\nnodes=${nodes} truncated=${truncated}`,
-            hwnd: tree?.hwnd ?? hwnd,
+            hwnd: targetHwnd,
             nodes,
             truncated,
           }
           return args.observe === true ? await attachFresh(runtime, action, value) : value
         }
 
-        const needle = typeof args.nameContains === 'string' ? args.nameContains.trim().toLowerCase() : ''
-        const roleNeedle = typeof args.role === 'string' ? args.role.trim().toLowerCase() : ''
-        if (!needle && !roleNeedle) {
+        const description = typeof args.description === 'string' ? args.description.trim() : ''
+        const needle = typeof args.nameContains === 'string' ? args.nameContains.trim() : ''
+        const roleNeedle = typeof args.role === 'string' ? args.role.trim() : ''
+        const limit = Number.isInteger(args.limit) ? Math.min(10, Math.max(1, args.limit)) : 3
+        if (!description && !needle && !roleNeedle) {
           throw new ToolError(
             'MISSING_FILTER',
-            'action "find" needs `nameContains` and/or `role`. Pass the visible label of the control (e.g. "保存") or its role (e.g. "Button"); use action "tree" if you have neither.',
+            'action "find" needs `description` (what the control says or does, e.g. "保存" / "the search box"), or `nameContains` and/or `role` for an exact filter. Use action "tree" if you have none of those.',
           )
         }
-        const matches = []
-        const walk = (node) => {
-          if (!node || matches.length >= 20) return
-          const name = String(node.name ?? '')
-          const value = node.value === null || node.value === undefined ? '' : String(node.value)
-          const automationId = String(node.automationId ?? '')
-          const roleText = String(node.role ?? '')
-          const haystack = `${name}\n${value}\n${automationId}`.toLowerCase()
-          const okName = !needle || haystack.includes(needle)
-          const okRole = !roleNeedle || roleText.toLowerCase().includes(roleNeedle)
-          if (okName && okRole) {
-            matches.push({
-              path: node.path,
-              role: roleText,
-              name,
-              value: value || null,
-              automationId: automationId || null,
-              bounds: node.bounds ?? null,
-              enabled: node.enabled !== false,
-              offscreen: node.offscreen === true,
-            })
+
+        // Two flavours: `description` ranks everything by fuzzy similarity and
+        // returns the best few; `nameContains` keeps the old exact-substring
+        // contract and returns every hit (up to 20).
+        let candidates
+        if (description) {
+          candidates = rankNodes(description, tree?.root, { limit, role: roleNeedle })
+          if (needle) {
+            const lower = needle.toLowerCase()
+            candidates = candidates.filter((c) => `${c.name} ${c.value ?? ''} ${c.automationId ?? ''}`.toLowerCase().includes(lower))
           }
-          for (const child of node.children ?? []) walk(child)
+        } else {
+          const lower = needle.toLowerCase()
+          const roleLower = roleNeedle.toLowerCase()
+          const hits = []
+          const walk = (node) => {
+            if (!node || hits.length >= 20) return
+            const name = String(node.name ?? '')
+            const value = node.value === null || node.value === undefined ? '' : String(node.value)
+            const automationId = String(node.automationId ?? '')
+            const roleText = String(node.role ?? '')
+            const haystack = `${name}\n${value}\n${automationId}`.toLowerCase()
+            const okName = !lower || haystack.includes(lower)
+            const okRole = !roleLower || roleText.toLowerCase().includes(roleLower)
+            if (okName && okRole) {
+              hits.push({
+                path: node.path,
+                role: roleText,
+                name,
+                value: value || null,
+                automationId: automationId || null,
+                bounds: node.bounds ?? null,
+                enabled: node.enabled !== false,
+                offscreen: node.offscreen === true,
+                score: null,
+                why: lower ? 'exact substring match' : 'role filter',
+              })
+            }
+            for (const child of node.children ?? []) walk(child)
+          }
+          walk(tree?.root)
+          candidates = hits
         }
-        walk(tree?.root)
-        if (matches.length === 0) {
+
+        if (candidates.length === 0) {
+          const asked = description ? `description=${JSON.stringify(description)}` : `${needle ? `nameContains=${JSON.stringify(needle)}` : ''}${needle && roleNeedle ? ' and ' : ''}${roleNeedle ? `role=${JSON.stringify(roleNeedle)}` : ''}`
           const value = {
             action,
             ok: true,
             found: 0,
-            matches: [],
-            text: `no element matched ${needle ? `nameContains=${JSON.stringify(args.nameContains)}` : ''}${needle && roleNeedle ? ' and ' : ''}${roleNeedle ? `role=${JSON.stringify(args.role)}` : ''} under ${hwnd === null ? 'the foreground window' : `hwnd=${hwnd}`} (${nodes} controls walked). Use ui_element with action "tree" to read the actual control names, or computer action "screenshot" with uiSummary "tree" to look at them visually.`,
+            candidates: [],
+            hwnd: targetHwnd,
+            nodes,
+            text: `no control matched ${asked} under ${where} (${nodes} controls walked). Use ui_element with action "tree" to read the real control names, or computer action "screenshot" with uiSummary "tree" to look at them visually.`,
           }
           return args.observe === true ? await attachFresh(runtime, action, value) : value
         }
-        const listed = matches.map((m) => `${m.role} "${m.name || m.automationId || m.value || ''}" path=${m.path} bounds=${boundsText(m.bounds)}`)
+
+        // Mark the candidates on a screenshot so a vision model can pick one
+        // instead of trusting the ranking: the pin numbers match this list.
+        const annotate = args.annotate !== false
+        const markable = candidates.filter((c) => c.bounds && Number(c.bounds.width) > 0 && Number(c.bounds.height) > 0)
+        let shot = null
+        if (annotate && markable.length > 0) {
+          try {
+            shot = await runtime.capture({
+              hwnd: targetHwnd,
+              uiSummary: 'none',
+              pins: markable.map((c) => ({
+                x: Math.round(c.bounds.x + c.bounds.width / 2),
+                y: Math.round(c.bounds.y + c.bounds.height / 2),
+                label: String(candidates.indexOf(c) + 1),
+              })),
+            })
+          } catch (cause) {
+            shot = null
+            runtime.log?.('warn', `ui_element find: could not annotate the screenshot: ${cause?.message ?? cause}`)
+          }
+        }
+        const view = shot?.view ?? null
+        const imagePoint = (bounds) => {
+          if (!view || !bounds) return null
+          return {
+            x: Math.round((bounds.x + bounds.width / 2 - view.capture.x) * view.scale),
+            y: Math.round((bounds.y + bounds.height / 2 - view.capture.y) * view.scale),
+          }
+        }
+        for (const candidate of candidates) {
+          candidate.center = candidate.bounds ? { x: Math.round(candidate.bounds.x + candidate.bounds.width / 2), y: Math.round(candidate.bounds.y + candidate.bounds.height / 2) } : null
+          candidate.image = imagePoint(candidate.bounds)
+        }
+
+        const listed = candidates.map((c, i) => {
+          const label = c.name || c.value || c.automationId || '(unnamed)'
+          const score = c.score === null ? '' : ` score=${c.score}`
+          const reason = c.why ? ` - ${c.why}` : ''
+          const point = c.image ? ` image=(${c.image.x},${c.image.y})` : ''
+          return `${i + 1}. ${c.role} "${label}" path=${c.path}${score}${reason}; bounds=${boundsText(c.bounds)}${point}`
+        })
+        const headline = description
+          ? `${candidates.length} candidate${candidates.length === 1 ? '' : 's'} for ${JSON.stringify(description)} in ${where} (${nodes} controls walked):`
+          : `${candidates.length} control${candidates.length === 1 ? '' : 's'} matched in ${where} (${nodes} controls walked):`
+        const footer = shot
+          ? `Act on the one you want by its path (ui_element action "invoke" path="${candidates[0].path}"), or click its image coordinates with computer action "click". The marker numbers on the attached screenshot match this list.`
+          : `Act on the one you want by its path (ui_element action "invoke" path="${candidates[0].path}"). Pass annotate:true to also get the candidates marked on a screenshot.`
         const value = {
           action,
           ok: true,
-          found: matches.length,
-          matches,
-          text: `${matches.length} element${matches.length === 1 ? '' : 's'} matched under ${hwnd === null ? 'the foreground window' : `hwnd=${hwnd}`}:\n${listed.join('\n')}\nAct on one with its path, e.g. action "invoke" path="${matches[0].path}".`,
+          found: candidates.length,
+          candidates,
+          hwnd: targetHwnd,
+          nodes,
+          image: shot?.image ?? null,
+          savedPath: shot?.savedPath ?? null,
+          view,
+          text: [headline, ...listed, footer].join('\n'),
         }
-        return args.observe === true ? await attachFresh(runtime, action, value) : value
+        if (args.observe === true && !shot) return await attachFresh(runtime, action, value)
+        return value
       }
 
       const protocolAction = ACTIONS[action]

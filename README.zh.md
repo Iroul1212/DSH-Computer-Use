@@ -213,10 +213,21 @@ pwsh -NoProfile -File scripts\uninstall.ps1 -Profile web
 
 ### `ui_element` —— Windows UI Automation
 
+`find` 收的是**描述**而不是精确名字：`{ action: "find", description: "保存" }` 会按名称、automationId、value、role、help text 给窗口里每个控件打分，返回最像的几个（带分数和一句理由），并把它们在截图里标成 **1..N**，视觉模型可以直接挑。匹配器对中文友好（用二元组，「保存」能命中「保存并关闭」），忽略标点和全角半角差异，会降低禁用控件和滚出屏幕控件的排名，还能识别类别词（「保存按钮」更偏向 Button）。
+
+```jsonc
+{ action: "find", description: "搜索框", limit: 3 }
+// 1. Group "FileExplorerSearchBox" path=0/2/0/5 score=0.77 - automationId contains the query; image=(789,56)
+// 2. ...
+// -> 用 path 操作它，或直接点它的图像坐标；截图上的编号与列表一致
+```
+
+想要精确子串过滤（返回全部命中，最多 20 条）时改用 `nameContains`。
+
 | action | 类别 | 参数 | 返回什么 |
 |---|---|---|---|
 | `tree` | 读 | `hwnd`、`maxDepth`、`maxNodes` | 缩进大纲，每行以 `path=0/2/1` 结尾；另有 `nodes`、`truncated` |
-| `find` | 读 | `nameContains`、`role`、`hwnd` | 最多 20 条 `matches[]`（`path`、`role`、`name`、`value`、`automationId`、`bounds`、`enabled`、`offscreen`），以及 `found` |
+| `find` | 读 | `description`、`nameContains`、`role`、`hwnd`、`limit`、`annotate` | 排序后的 `candidates[]`（`path`、`role`、`name`、`value`、`automationId`、`bounds`、`center`、`image`、`score`、`why`）、`found`，默认还会附一张把候选标成 1..N 的截图 |
 | `invoke` | **mutating** | `path` | `path`、`hwnd`、`result`（bounds） |
 | `set_value` | **mutating** | `path`、`value` | 同上 |
 | `focus` | **mutating** | `path` | 同上 |

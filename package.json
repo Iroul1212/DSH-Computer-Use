@@ -35,7 +35,7 @@
   },
   "scripts": {
     "smoke": "node test/smoke-win.mjs",
-    "test": "node test/schema-contract.mjs && node test/plugin-selftest.mjs && node test/skills-write-selftest.mjs && node test/safety-selftest.mjs && node test/ocr-selftest.mjs && node test/overlay-selftest.mjs && node test/observe-selftest.mjs && node test/smoke-win.mjs",
+    "test": "node test/schema-contract.mjs && node test/match-selftest.mjs && node test/plugin-selftest.mjs && node test/skills-write-selftest.mjs && node test/safety-selftest.mjs && node test/ocr-selftest.mjs && node test/overlay-selftest.mjs && node test/observe-selftest.mjs && node test/smoke-win.mjs",
     "test:schema": "node test/schema-contract.mjs",
     "test:plugin": "node test/plugin-selftest.mjs",
     "test:safety": "node test/safety-selftest.mjs",
@@ -43,6 +43,7 @@
     "test:ocr": "node test/ocr-selftest.mjs",
     "test:overlay": "node test/overlay-selftest.mjs",
     "inspect": "node test/inspect.mjs",
-    "test:observe": "node test/observe-selftest.mjs"
+    "test:observe": "node test/observe-selftest.mjs",
+    "test:match": "node test/match-selftest.mjs"
   }
 }

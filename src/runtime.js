@@ -641,6 +641,9 @@ export class ComputerRuntime {
         gridStep: Number.isFinite(Number(options.gridStep)) ? Number(options.gridStep) : 0,
         mark: options.mark ?? null,
         dim: options.dim ?? null,
+        // pins: numbered markers in PHYSICAL pixels, mapped to image space by the
+        // host. Used by ui_element find to label its candidates on one capture.
+        pins: Array.isArray(options.pins) ? options.pins : null,
         // compare: diff this capture against the previous one of the same target.
         compare: options.compare === true,
       },

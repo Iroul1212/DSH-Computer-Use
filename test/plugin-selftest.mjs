@@ -191,6 +191,18 @@ await step('computer: decorations + verify plumbing', async () => {
   return 'grid/mark/dim/compare/verify wired'
 })
 
+await step('ui_element: fuzzy find surface', async () => {
+  const tool = ctx.collected.find((t) => t.name === 'ui_element')
+  const props = tool?.parameters?.properties ?? {}
+  assert(props.description, 'ui_element.find is missing the description parameter')
+  assert(props.description.type === 'string', 'description must be a string')
+  assert(props.limit?.type === 'integer', 'limit must be an integer')
+  assert(props.annotate?.type === 'boolean', 'annotate must be a boolean')
+  assert(typeof props.nameContains?.description === 'string', 'nameContains must stay documented')
+  assert(tool.parameters.required.includes('action'), 'ui_element must still require action')
+  return 'description + limit + annotate + nameContains'
+})
+
 await step('inject/manifest sanity', async () => {
   assert(name === 'computer-use', 'plugin name must be "computer-use"')
   assert(Array.isArray(inject) && inject.length === 1 && inject[0] === 'tools', 'inject must be ["tools"]')
