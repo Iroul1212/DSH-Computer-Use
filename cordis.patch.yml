@@ -1,0 +1,55 @@
+# dsh-computer-use — Codex-style computer use for DeepSeek Harness (Windows only).
+#
+# This bundle inserts exactly one row. Everything else (tools, safety gates,
+# the on-screen overlay) lives inside the plugin module, so a user can disable
+# or reconfigure the whole capability by editing this row's `config` from their
+# profile's own `cordis.patch.yml` — same id, last write wins.
+- insert:
+    - id: computer-use
+      name: 'dsh-computer-use'
+      # Interactive desktop input is a Windows-only capability; on any other
+      # platform the row stays inert instead of failing the profile boot.
+      disabled: !!js process.platform !== 'win32'
+      config:
+        # Master switch. false registers no tools at all.
+        enabled: true
+        # Vision: screenshots are downscaled to at most this width before they
+        # are handed to the model. Coordinates the model returns are read in
+        # THIS image space and mapped back to physical pixels by the plugin.
+        screenshot:
+          maxWidth: 1280
+          maxPixels: 600000
+          format: jpeg
+          jpegQuality: 80
+        # 'summary' | 'none' | 'tree' — how much UI Automation detail a plain
+        # screenshot returns as text. Text-only models rely on this.
+        uiSummary: summary
+        # 'auto' shows the overlay only while a mutating action is running,
+        # 'always' keeps it up for the whole session, 'never' disables it.
+        overlay: auto
+        overlayMessage: 'DeepSeek Harness 正在操控你的电脑 · 按 Esc 停止'
+        # Global Esc kill switch. When tripped, every mutating action fails
+        # until the model calls computer with action "resume".
+        escStop: true
+        # When true nothing is actually sent to the OS; actions are only logged.
+        dryRun: false
+        # DSH approval gate: 'never' | 'mutating'. Asking is only meaningful when
+        # the session approval policy is 'ask'; under 'never' (which is what
+        # danger-full-access pins) every ask is rejected, so keep this 'never'
+        # unless you actually run with approval: ask.
+        requireApproval: never
+        allowLaunch: true
+        allowCloseWindow: true
+        # Per-app skill library: built-in shortcut recipes for Excel / Word /
+        # PowerPoint / Chrome / Explorer / Notepad / VS Code / Terminal. A
+        # screenshot of a matching app prints a one-line pointer, and the model
+        # calls app_skill to read the recipe (4000-character cap per skill).
+        skills: true
+        # Extra directory of `*.md` skills that override built-ins by app id.
+        # Defaults to $DSH_HOME/computer-use-skills when omitted.
+        skillsDir: null
+        # Print the "App skill available for X" line in every screenshot result.
+        skillsHint: true
+
+
+
