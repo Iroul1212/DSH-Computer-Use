@@ -432,8 +432,43 @@ function Get-CursorPos {
     return [pscustomobject]@{ x = [int]$p.x; y = [int]$p.y }
 }
 
-function Move-CursorTo {
+function Test-CursorAt {
+    param([int]$X, [int]$Y, [int]$Tolerance = 2)
+    $c = Get-CursorPos
+    return (([math]::Abs($c.x - $X) -le $Tolerance) -and ([math]::Abs($c.y - $Y) -le $Tolerance))
+}
+
+function Set-CursorPosChecked {
+    # Last-resort pointer placement. Returns $true only when the pointer is
+    # verifiably where the caller asked for it, so a silent miss cannot happen.
+    param([int]$X, [int]$Y, [int]$Tolerance = 2)
+    $vs = Get-VirtualScreen
+    $cx = [math]::Min([math]::Max($X, $vs.x), ($vs.x + $vs.width - 1))
+    $cy = [math]::Min([math]::Max($Y, $vs.y), ($vs.y + $vs.height - 1))
+    try { $ok = [bool][DshWin32]::SetCursorPos([int]$cx, [int]$cy) } catch { $ok = $false }
+    if (-not $ok) { return $false }
+    return (Test-CursorAt $X $Y $Tolerance)
+}
+
+function Get-PointerReceipt {
+    # Proof of where the pointer actually is. Returned by every pointer action so
+    # the agent, and the audit trail, can tell "moved" from "was told to move".
     param([int]$X, [int]$Y)
+    $c = Get-CursorPos
+    $dx = [math]::Abs($c.x - $X)
+    $dy = [math]::Abs($c.y - $Y)
+    return [ordered]@{
+        x = $c.x
+        y = $c.y
+        requestedX = $X
+        requestedY = $Y
+        drift = [int][math]::Max($dx, $dy)
+        landed = (($dx -le 2) -and ($dy -le 2))
+    }
+}
+
+function Move-CursorTo {
+    param([int]$X, [int]$Y, [int]$Tolerance = 2, [switch]$SkipVerify)
     $vs = Get-VirtualScreen
     $vw = [math]::Max(2, $vs.width)
     $vh = [math]::Max(2, $vs.height)
@@ -443,6 +478,21 @@ function Move-CursorTo {
     if ($ny -lt 0) { $ny = 0 } elseif ($ny -gt 65535) { $ny = 65535 }
     $flags = [uint32](0x0001 -bor 0x8000 -bor 0x4000)   # MOVE|ABSOLUTE|VIRTUALDESK
     Send-InputArray @((New-MouseInput $flags $nx $ny))
+    if ($SkipVerify) { return }
+
+    # SendInput returning 1 only means "the event was queued", not "the pointer
+    # moved": a foreground app in raw-input mode (a game), a mirrored remote
+    # session or a window above ours can swallow the event. For a clicking agent
+    # a silent miss is the worst possible failure, so read back where the pointer
+    # really ended up and either rescue the move or refuse the action.
+    if (Test-CursorAt $X $Y $Tolerance) { return }
+    $missed = Get-CursorPos
+    if (Set-CursorPosChecked $X $Y $Tolerance) {
+        Write-Host-Log ("pointer: SendInput left the cursor at (" + $missed.x + "," + $missed.y + "); SetCursorPos rescued the move to (" + $X + "," + $Y + ")")
+        return
+    }
+    $final = Get-CursorPos
+    Fail 'POINTER_NOT_LANDED' ("Could not put the pointer at (" + $X + "," + $Y + "): after SendInput and a SetCursorPos fallback Windows still reports (" + $final.x + "," + $final.y + "). Something is capturing the mouse - a game in raw-input mode, a mirrored remote session, or a window above this process - so a click here would land somewhere else. Bring the target window to the front (app_window action focus), confirm with computer action cursor, and do not guess coordinates while the pointer will not follow.")
 }
 
 function Get-ButtonFlags {
@@ -767,9 +817,11 @@ function Invoke-Cmd-Screenshot($a) {
         $msTransform = [int]$sw.ElapsedMilliseconds
         $imgW = [int]$bmp.Width
         $imgH = [int]$bmp.Height
+        # Diff against the previous capture BEFORE drawing on this one: the grid
+        # and the markers would otherwise be counted as "the screen changed".
+        $change = Get-FrameChange $bmp $a
         $decorated = Add-ScreenshotDecorations $bmp $a
-$change = Get-FrameChange $bmp $a
-$bytes = Get-BitmapBytes $bmp $format $quality
+        $bytes = Get-BitmapBytes $bmp $format $quality
         $msEncode = [int]$sw.ElapsedMilliseconds
     } finally {
         if ($null -ne $bmp) { try { $bmp.Dispose() } catch { } }
@@ -785,8 +837,8 @@ $bytes = Get-BitmapBytes $bmp $format $quality
     $result = [ordered]@{
         image = [ordered]@{
             base64 = [System.Convert]::ToBase64String($bytes)
-          decorated = $decorated
-          change = $change
+            decorated = $decorated
+            change = $change
             mime   = 'image/' + $format
             width  = $imgW
             height = $imgH
@@ -832,7 +884,7 @@ function Invoke-Cmd-Move($a) {
         }
     }
     $c = Get-CursorPos
-    return [ordered]@{ x = $c.x; y = $c.y }
+    return [ordered]@{ x = $c.x; y = $c.y; pointer = (Get-PointerReceipt $x $y) }
 }
 
 function Invoke-Cmd-Click($a) {
@@ -862,7 +914,9 @@ function Invoke-Cmd-Click($a) {
     Send-InputArray $up.ToArray()
 
     $c = Get-CursorPos
-    return [ordered]@{ x = $c.x; y = $c.y; count = $count; button = $button }
+    $asked = $null
+    if ($null -ne $x -and $null -ne $y) { $asked = Get-PointerReceipt ([int]$x) ([int]$y) }
+    return [ordered]@{ x = $c.x; y = $c.y; count = $count; button = $button; pointer = $asked }
 }
 
 function Test-EscapeDown {
@@ -920,6 +974,7 @@ function Invoke-Cmd-Drag($a) {
         to   = [ordered]@{ x = $c.x; y = $c.y }
         button = $button
         aborted = $aborted
+        pointer = (Get-PointerReceipt $c.x $c.y)
     }
 }
 
@@ -936,7 +991,9 @@ function Invoke-Cmd-Scroll($a) {
     if ($dy -ne 0) { Send-InputArray @((New-MouseInput ([uint32]0x0800) 0 0 ([uint32]($dy -band 0xFFFFFFFF)))) }
     if ($dx -ne 0) { Send-InputArray @((New-MouseInput ([uint32]0x1000) 0 0 ([uint32]($dx -band 0xFFFFFFFF)))) }
     $c = Get-CursorPos
-    return [ordered]@{ x = $c.x; y = $c.y; dy = $dy; dx = $dx }
+    $askedX = $c.x; $askedY = $c.y
+    if ($null -ne $x -and $null -ne $y) { $askedX = [int]$x; $askedY = [int]$y }
+    return [ordered]@{ x = $c.x; y = $c.y; dy = $dy; dx = $dx; pointer = (Get-PointerReceipt $askedX $askedY) }
 }
 
 # ===========================================================================
@@ -1632,101 +1689,11 @@ function Invoke-Cmd-Guard($a) {
 # ===========================================================================
 # 17. Command dispatch
 # ===========================================================================
-function Test-DecFlag($a, [string]$name) {
-  try { $v = Get-Arg $a $name } catch { try { $v = $a.$name } catch { $v = $null } }
-  return ($v -eq $true -or $v -eq 'true' -or $v -eq 1 -or $v -eq '1')
-}
-function Get-DecValue($a, [string]$name) {
-  try { return (Get-Arg $a $name) } catch { try { return $a.$name } catch { return $null } }
-}
-$script:FrameCache = @{}
-function Add-ScreenshotDecorations($bmp, $a) {
-  $grid = Test-DecFlag $a 'grid'
-  $mark = Get-DecValue $a 'mark'
-  $dim = Get-DecValue $a 'dim'
-  if (-not $grid -and $null -eq $mark -and $null -eq $dim) { return $false }
-  $g = [System.Drawing.Graphics]::FromImage($bmp)
-  try {
-    $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
-    if ($null -ne $dim) {
-      $x = [int]$dim.x; $y = [int]$dim.y; $w = [int]$dim.width; $h = [int]$dim.height
-      $shade = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(120, 0, 0, 0))
-      try {
-        $g.FillRectangle($shade, 0, 0, $bmp.Width, [Math]::Max(0, $y))
-        $g.FillRectangle($shade, 0, $y + $h, $bmp.Width, [Math]::Max(0, $bmp.Height - $y - $h))
-        $g.FillRectangle($shade, 0, $y, [Math]::Max(0, $x), $h)
-        $g.FillRectangle($shade, $x + $w, $y, [Math]::Max(0, $bmp.Width - $x - $w), $h)
-      } finally { $shade.Dispose() }
-      $pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(255, 255, 140, 0)), 2
-      try { $g.DrawRectangle($pen, $x, $y, $w, $h) } finally { $pen.Dispose() }
-    }
-    if ($grid) {
-      $step = [int](Get-DecValue $a 'gridStep')
-      if ($step -le 0) { $step = [int]([Math]::Max(50, [Math]::Round($bmp.Width / 10.0 / 50) * 50)) }
-      $pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(120, 255, 80, 0)), 1
-      $font = New-Object System.Drawing.Font 'Consolas', 9
-      $ink = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(235, 255, 255, 255))
-      $back = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(175, 0, 0, 0))
-      try {
-        for ($x = $step; $x -lt $bmp.Width; $x += $step) { $g.DrawLine($pen, $x, 0, $x, $bmp.Height) }
-        for ($y = $step; $y -lt $bmp.Height; $y += $step) { $g.DrawLine($pen, 0, $y, $bmp.Width, $y) }
-        for ($x = $step; $x -lt $bmp.Width; $x += $step) {
-          for ($y = $step; $y -lt $bmp.Height; $y += $step) {
-            $label = '' + $x + ',' + $y
-            $size = $g.MeasureString($label, $font)
-            $g.FillRectangle($back, $x + 1, $y + 1, $size.Width, $size.Height)
-            $g.DrawString($label, $font, $ink, $x + 1, $y + 1)
-          }
-        }
-      } finally { $pen.Dispose(); $font.Dispose(); $ink.Dispose(); $back.Dispose() }
-    }
-    if ($null -ne $mark) {
-      $mx = [int]$mark.x; $my = [int]$mark.y
-      $pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(255, 255, 40, 40)), 3
-      try {
-        $g.DrawEllipse($pen, $mx - 14, $my - 14, 28, 28)
-        $g.DrawLine($pen, $mx - 22, $my, $mx + 22, $my)
-        $g.DrawLine($pen, $mx, $my - 22, $mx, $my + 22)
-      } finally { $pen.Dispose() }
-    }
-  } finally { $g.Dispose() }
-  return $true
-}
-function Get-FrameChange($bmp, $a) {
-  $want = Test-DecFlag $a 'compare'
-  $key = 'all'
-  $hw = Get-DecValue $a 'hwnd'
-  $sc = Get-DecValue $a 'screen'
-  if ($null -ne $hw) { $key = 'w' + $hw } elseif ($null -ne $sc) { $key = 's' + $sc }
-  $prev = $null
-  if ($script:FrameCache.ContainsKey($key)) { $prev = $script:FrameCache[$key] }
-  $result = $null
-  if ($want -and $null -ne $prev -and $prev.Width -eq $bmp.Width -and $prev.Height -eq $bmp.Height) {
-    $w = $bmp.Width; $h = $bmp.Height; $step = 4
-    $changed = 0; $total = 0; $minX = $w; $minY = $h; $maxX = -1; $maxY = -1
-    for ($y = 0; $y -lt $h; $y += $step) {
-      for ($x = 0; $x -lt $w; $x += $step) {
-        $total++
-        if ($bmp.GetPixel($x, $y).ToArgb() -ne $prev.GetPixel($x, $y).ToArgb()) {
-          $changed++
-          if ($x -lt $minX) { $minX = $x }; if ($y -lt $minY) { $minY = $y }
-          if ($x -gt $maxX) { $maxX = $x }; if ($y -gt $maxY) { $maxY = $y }
-        }
-      }
-    }
-    $ratio = 0
-    if ($total -gt 0) { $ratio = [Math]::Round($changed / $total, 4) }
-    $bounds = $null
-    if ($maxX -ge 0) { $bounds = @{ x = $minX; y = $minY; width = [Math]::Max(1, $maxX - $minX + $step); height = [Math]::Max(1, $maxY - $minY + $step) } }
-    $result = @{ changed = ($ratio -gt 0.001); ratio = $ratio; bounds = $bounds }
-  }
-  if ($null -ne $prev) { $prev.Dispose() }
-  $script:FrameCache[$key] = New-Object System.Drawing.Bitmap $bmp
-  if ($script:FrameCache.Count -gt 2) {
-    foreach ($k in @($script:FrameCache.Keys)) { if ($k -ne $key) { $script:FrameCache[$k].Dispose(); $script:FrameCache.Remove($k) } }
-  }
-  return $result
-}
+# Screenshot decorations (grid / mark / dim) and the frame diff behind
+# compare / verify live in their own dot-sourced file so this script stays
+# about the protocol. Loaded here, before any command can run.
+. (Join-Path $PSScriptRoot 'decorations.ps1')
+
 function Invoke-HostCommand {
     param([string]$Cmd, $Args_)
     $name = $Cmd.Trim().ToLowerInvariant()

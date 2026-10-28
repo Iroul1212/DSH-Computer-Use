@@ -11,7 +11,7 @@
  * and the bytes themselves live in the harness attachment store.
  * @module dsh-computer-use/tools
  */
-import { ToolError } from './runtime.js'
+import { ToolError, describeChange } from './runtime.js'
 
 /** Canonical value schema: every tool returns one object, documented per action. */
 const OUTPUT = { type: 'object', additionalProperties: true }
@@ -149,6 +149,36 @@ export function createComputerTool(runtime, config) {
         enum: ['none', 'summary', 'tree'],
         description: 'Screenshot: how much UI Automation detail to include as text alongside the image. Use "tree" when the image is hard to read or when you need exact element names.',
       },
+      grid: {
+        type: 'boolean',
+        description: 'Screenshot: draw a labelled coordinate grid over the image. Labels are image-space coordinates, so a number read off the grid can be passed straight back to click/move.',
+      },
+      gridStep: { type: 'integer', description: 'Screenshot: grid spacing in image pixels. Defaults to about a tenth of the image width, rounded to 50.' },
+      mark: {
+        type: 'object',
+        additionalProperties: false,
+        description: 'Screenshot: draw a crosshair at this image-space point, e.g. exactly where the next click will land.',
+        properties: { x: { type: 'integer', required: true }, y: { type: 'integer', required: true } },
+      },
+      dim: {
+        type: 'object',
+        additionalProperties: false,
+        description: 'Screenshot: darken everything outside this image-space rectangle so one region stands out.',
+        properties: {
+          x: { type: 'integer', required: true },
+          y: { type: 'integer', required: true },
+          width: { type: 'integer', required: true },
+          height: { type: 'integer', required: true },
+        },
+      },
+      compare: {
+        type: 'boolean',
+        description: 'Screenshot: report how much of the screen changed since the previous capture of the same target. Screenshot before an action and after it to prove the action did something.',
+      },
+      verify: {
+        type: 'boolean',
+        description: 'Actions that change the desktop: take one extra capture after the action and report whether the screen actually changed. Cheaper than observe - no image is attached, only the verdict and the changed region.',
+      },
       observe: OBSERVE,
     }),
     output: { schema: OUTPUT, render: (_args, value) => renderValue(value) },
@@ -168,6 +198,11 @@ export function createComputerTool(runtime, config) {
             region: args.region,
             maxWidth: args.maxWidth,
             uiSummary: args.uiSummary,
+            grid: args.grid === true,
+            gridStep: args.gridStep,
+            mark: args.mark ?? null,
+            dim: args.dim ?? null,
+            compare: args.compare === true,
           })
           return value
         }
@@ -299,20 +334,41 @@ export function createComputerTool(runtime, config) {
 async function afterAction(runtime, args, action, text) {
   const delay = runtime.config.actionDelayMs ?? 0
   if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay))
+
+  // observe: the model wants to look at the result, so pay for the pixels.
   if (config_wantsObserve(args)) {
-    const shot = await runtime.capture({})
-    return { ...shot, action, ok: true, text: `${text}\n${shot.view ? '' : ''}Fresh screenshot attached.` }
+    const shot = await runtime.capture({ compare: true })
+    const verdict = describeChange(shot.change).join('\n')
+    return { ...shot, action, ok: true, text: `${text}\n${verdict}\nFresh screenshot attached.` }
   }
+
+  // verify: the model only wants the verdict, so skip the attachment, the UI
+  // outline and the image encoding that make an observe round trip expensive.
+  if (config_wantsVerify(args)) {
+    const shot = await runtime.capture({ compare: true, attach: false, uiSummary: 'none' })
+    const verdict = describeChange(shot.change).join('\n')
+    return { action, ok: true, change: shot.change, view: shot.view, cursor: shot.cursor, text: `${text}\n${verdict}` }
+  }
+
   return { action, ok: true, text }
 }
 
 /**
- * Whether this call asked for a verification screenshot.
+ * Whether this call asked for a silent post-action verification.
  * @param args - tool arguments.
- * @returns true when `observe` is set.
+ * @returns true when `verify` is set and `observe` is not.
+ */
+/**
+ * Whether this call asked for a fresh screenshot after the action.
+ * @param args - tool arguments.
+ * @returns true when observe is set.
  */
 function config_wantsObserve(args) {
   return args?.observe === true
+}
+
+function config_wantsVerify(args) {
+  return args?.verify === true && args?.observe !== true
 }
 
 /* ========================================================================== *

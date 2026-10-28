@@ -116,7 +116,7 @@ Say these to the agent in a DSH session. The tool sequences are what the plugin'
 If the target is a control with a visible label rather than a window (`ui_element` `{ action: "find", nameContains: "保存" }` → `ui_element` `{ action: "invoke", path: "0/2/1" }`), the agent will usually prefer that over coordinates: it survives layout changes and works for text-only models.
 ## Tools
 
-Five tools, **36 actions** in total (`computer` 14, `app_window` 7, `ui_element` 8, `clipboard` 2, `app_skill` 5). Everything a mutating call returns also accepts `observe: true`, which appends a fresh screenshot to the same result (one round trip instead of two). `clipboard` and `app_skill` have no `observe`.
+Five tools, **38 actions** in total (`computer` 16, `app_window` 7, `ui_element` 8, `clipboard` 2, `app_skill` 5). Everything a mutating call returns also accepts `observe: true` (append a fresh screenshot) or `verify: true` (take a capture and report whether the screen changed, without attaching pixels). `clipboard` and `app_skill` have neither.
 
 Every tool returns one canonical JSON object. `output.render` turns it into `[text block, optional image block]`, and the image block carries an attachment reference (`image`), never bytes.
 
@@ -128,7 +128,7 @@ Every tool returns one canonical JSON object. `output.render` turns it into `[te
 
 | action | Kind | Parameters it uses | Returns |
 |---|---|---|---|
-| `screenshot` | read | `screen`, `hwnd`, `region`, `maxWidth`, `uiSummary` | `text` (envelope: coordinate mapping factor, cursor in physical and image space, foreground window, UI Automation outline), `image` (attachment ref or `null`), `savedPath`, `view` (`width`,`height`,`scale`,`capture`,`screen`,`at`), `cursor`, `fallback`, `ui` |
+| `screenshot` | read | `screen`, `hwnd`, `region`, `maxWidth`, `uiSummary`, `grid`, `gridStep`, `mark`, `dim`, `compare` | `text` (envelope: coordinate mapping factor, cursor in physical and image space, foreground window, UI Automation outline, screen-change verdict), `image` (attachment ref or `null`), `savedPath`, `view` (`width`,`height`,`scale`,`capture`,`screen`,`at`), `cursor`, `change`, `fallback`, `ui` |
 | `cursor` | read | — | `cursor` `{x,y}` in physical pixels, plus the same point in the last screenshot's space |
 | `status` | read | — | text: host state, overlay visible/hidden, Esc state, dry-run flag, number of mutating actions, coordinate space |
 | `move` | **mutating** | `x`, `y` | physical `{x,y}` the pointer was moved to |
@@ -162,7 +162,30 @@ Prefix `x`/`y` with nothing: they are always read in the pixel space of the **la
 | `region` | object `{x,y,width,height}` (all required, integers) | no | Capture a physical-pixel rectangle. |
 | `maxWidth` | integer | no | Downscale this capture to at most this width (overrides `screenshot.maxWidth` for one call). |
 | `uiSummary` | `none` / `summary` / `tree` | no | UI Automation detail returned as text next to the image. |
-| `observe` | boolean | no | Append a fresh screenshot to the result. |
+| `compare` | boolean | no | Diff this capture against the previous capture of the same target (window / screen) and return a `change` object. |
+| `grid` | boolean | no | Draw a labelled coordinate grid over the image. Labels are image-space, so they can be fed straight back to `click`. |
+| `gridStep` | integer | no | Grid spacing in image pixels (default ≈ width/10, rounded to 50). |
+| `mark` | object `{x,y}` | no | Draw a crosshair at one image-space point — "this is where the next click lands". |
+| `dim` | object `{x,y,width,height}` | no | Darken everything outside this image-space rectangle. |
+| `verify` | boolean | no | Mutating actions only: take one extra capture afterwards and report `change` without attaching an image. |
+| `observe` | boolean | no | Append a fresh screenshot to the result (implies `compare`). |
+
+#### Did it work? `verify` vs `observe`
+
+Every capture refreshes one small signature of its target, so the screenshot the model already looked at is the reference the next action is judged against. That turns the most common failure mode of a desktop agent — clicking, seeing nothing, and clicking again — into a verifiable step:
+
+```jsonc
+{ "action": "click", "x": 420, "y": 260, "verify": true }
+// -> text: "Clicked left at image (420,260) = physical (1099,680).
+//           Screen verdict: NO visible change since the previous capture (0.0% of sampled pixels differ).
+//           If this followed an action, that action probably did nothing - re-read the screenshot ..."
+```
+
+`verify` costs one capture (~150 ms) and no image tokens; `observe` costs the same capture plus an attached image. Grid and markers are drawn **after** the diff, so a decorated screenshot never counts as "the screen changed", and a decorated frame never becomes the reference.
+
+#### The pointer receipt
+
+`move`, `click`, `drag` and `scroll` return a `pointer` receipt (`{x, y, requestedX, requestedY, drift, landed}`) read back from `GetCursorPos`, and every move is verified: if `SendInput` is accepted but the pointer does not end up where it was sent, the host retries once with `SetCursorPos` and, if that fails too, fails the call with `POINTER_NOT_LANDED` instead of clicking somewhere else. A silent off-target click is the one failure a computer-use agent must never have.
 
 ### `app_window` — real windows
 
@@ -437,15 +460,16 @@ The loop for one action:
 
 ## Testing
 
-Six Node suites. No build step, no global install:
+Seven Node suites. No build step, no global install:
 
 ```powershell
-npm test                      # all five suites
+npm test                      # all seven suites
 npm run test:schema           # tool definitions inside the JSON Schema subset the host enforces (runs the validator shipped with the host)
 npm run test:plugin           # plugin entry + the 5 registered tools + a real screenshot and window listing
 npm run test:skills           # 15 assertions on the writable user layer (save / append / remove / overwrite / caps) against a temp directory
 npm run test:safety           # the 10 safety contracts (dry run / overlay / Esc / resume cooldown / blocklist / guard-exited and host-exited fail closed)
-npm run test:overlay          # overlay child process + a real injected Esc
+npm run test:overlay          # overlay child process + a real injected Esc (SKIPs when the desktop swallows synthetic input)
+npm run test:observe          # grid / mark / dim, the frame diff behind compare+verify, and the POINTER_NOT_LANDED fail-closed path
 npm run smoke                 # 11-step end-to-end exercise of the Windows host (screenshot / Chinese input / window ops / timing)
 ```
 

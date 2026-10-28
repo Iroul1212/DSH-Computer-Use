@@ -125,6 +125,72 @@ await step('computer: action enum', async () => {
   return `${action.enum.length} actions`
 })
 
+/**
+ * A runtime stand-in that records what the tool layer asks for, so the
+ * verification plumbing can be tested without a desktop.
+ * @returns a fake ComputerRuntime-shaped object.
+ */
+function makeFakeRuntime() {
+  const calls = []
+  const captures = []
+  const rt = {
+    config: normalizeConfig({ actionDelayMs: 0 }),
+    lastView: { width: 800, height: 600, scale: 0.5, capture: { x: 0, y: 0, width: 1600, height: 1200 } },
+    tripped: null,
+    mutations: 0,
+    hostState: 'ready',
+    overlayArmed: false,
+    overlayError: null,
+    calls,
+    captures,
+    skillCatalog: () => 'excel: test',
+    skillFor: () => null,
+    toPhysical: (x, y) => ({ x: x == null ? null : Math.round(x / 0.5), y: y == null ? null : Math.round(y / 0.5) }),
+    async beforeMutation() { return { dryRun: false } },
+    async call(cmd, args) { calls.push({ cmd, args }); return { x: 11, y: 22, chars: 3, from: { x: 1, y: 2 }, to: { x: 3, y: 4 } } },
+    async capture(options = {}) {
+      captures.push(options)
+      return {
+        action: 'screenshot',
+        ok: true,
+        text: 'capture',
+        view: rt.lastView,
+        change: options.compare === true
+          ? { comparable: true, changed: true, ratio: 0.12, bounds: { x: 1, y: 2, width: 30, height: 40 }, sample: '256x160' }
+          : null,
+      }
+    },
+  }
+  return rt
+}
+
+await step('computer: decorations + verify plumbing', async () => {
+  const fake = makeFakeRuntime()
+  const tool = createComputerTool(fake, fake.config)
+  const props = tool.parameters.properties
+  for (const key of ['grid', 'gridStep', 'mark', 'dim', 'compare', 'verify']) {
+    assert(props[key], 'computer is missing the ' + key + ' parameter')
+  }
+
+  await tool.execute({ action: 'screenshot', grid: true, gridStep: 120, mark: { x: 10, y: 20 }, dim: { x: 1, y: 2, width: 300, height: 200 }, compare: true })
+  const shotArgs = fake.captures[0]
+  assert(shotArgs.grid === true && shotArgs.gridStep === 120, 'grid/gridStep were not forwarded')
+  assert(shotArgs.mark?.x === 10 && shotArgs.dim?.width === 300, 'mark/dim were not forwarded')
+  assert(shotArgs.compare === true, 'compare was not forwarded')
+
+  const clicked = await tool.execute({ action: 'click', x: 100, y: 200, verify: true })
+  const verifyArgs = fake.captures[1]
+  assert(verifyArgs.compare === true, 'verify must compare against the previous frame')
+  assert(verifyArgs.attach === false, 'verify must not pay for an attachment')
+  assert(clicked.change?.changed === true, 'verify must return the change object')
+  assert(/CHANGED/.test(clicked.text), 'verify text must state the verdict, got: ' + clicked.text)
+
+  const typed = await tool.execute({ action: 'click', x: 100, y: 200, observe: true })
+  assert(fake.captures[2].attach !== false, 'observe must attach the image')
+  assert(/CHANGED/.test(typed.text), 'observe text must carry the verdict too')
+  return 'grid/mark/dim/compare/verify wired'
+})
+
 await step('inject/manifest sanity', async () => {
   assert(name === 'computer-use', 'plugin name must be "computer-use"')
   assert(Array.isArray(inject) && inject.length === 1 && inject[0] === 'tools', 'inject must be ["tools"]')

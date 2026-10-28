@@ -2,7 +2,13 @@
   "name": "dsh-computer-use",
   "version": "0.1.0",
   "description": "Codex-style computer use for DeepSeek Harness: screenshot, mouse, keyboard, window and UI Automation control of a real Windows desktop, with a visible overlay and an Esc kill switch.",
-  "keywords": ["dsh-plugin", "computer-use", "windows", "uiautomation", "screenshot"],
+  "keywords": [
+    "dsh-plugin",
+    "computer-use",
+    "windows",
+    "uiautomation",
+    "screenshot"
+  ],
   "license": "MIT",
   "type": "module",
   "main": "src/index.js",
@@ -29,19 +35,14 @@
   },
   "scripts": {
     "smoke": "node test/smoke-win.mjs",
-    "test": "node test/schema-contract.mjs && node test/plugin-selftest.mjs && node test/skills-write-selftest.mjs && node test/safety-selftest.mjs && node test/ocr-selftest.mjs && node test/overlay-selftest.mjs && node test/smoke-win.mjs",
+    "test": "node test/schema-contract.mjs && node test/plugin-selftest.mjs && node test/skills-write-selftest.mjs && node test/safety-selftest.mjs && node test/ocr-selftest.mjs && node test/overlay-selftest.mjs && node test/observe-selftest.mjs && node test/smoke-win.mjs",
     "test:schema": "node test/schema-contract.mjs",
     "test:plugin": "node test/plugin-selftest.mjs",
     "test:safety": "node test/safety-selftest.mjs",
     "test:skills": "node test/skills-write-selftest.mjs",
     "test:ocr": "node test/ocr-selftest.mjs",
     "test:overlay": "node test/overlay-selftest.mjs",
-    "inspect": "node test/inspect.mjs"
+    "inspect": "node test/inspect.mjs",
+    "test:observe": "node test/observe-selftest.mjs"
   }
 }
-
-
-
-
-
-

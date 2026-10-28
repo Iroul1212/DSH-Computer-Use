@@ -56,6 +56,25 @@ export const CONFIG_DEFAULTS = {
   ocrMaxLines: 200,
 }
 
+/**
+ * Render the host's `change` record as a verdict the model can act on.
+ * @param change - `{comparable, changed, ratio, bounds, sample}` or null.
+ * @returns {string[]} zero or more lines for the model-facing text.
+ */
+export function describeChange(change) {
+  if (!change || typeof change !== 'object') return []
+  if (change.comparable === false) {
+    return ['No previous capture of this target to compare against, so whether anything changed is unknown; take another screenshot after the next action to enable the comparison.']
+  }
+  if (change.changed !== true) {
+    return ['Screen verdict: NO visible change since the previous capture (' + ((Number(change.ratio) || 0) * 100).toFixed(1) + '% of sampled pixels differ). If this followed an action, that action probably did nothing - re-read the screenshot instead of repeating the same click.']
+  }
+  const pct = ((Number(change.ratio) || 0) * 100).toFixed(1)
+  const b = change.bounds
+  const where = b ? ` in region (${b.x},${b.y}) ${b.width}x${b.height}` : ''
+  return [`Screen verdict: CHANGED - ${pct}% of sampled pixels differ from the previous capture${where}.`]
+}
+
 /** A tool failure with a stable machine code and a model-actionable message. */
 export class ToolError extends Error {
   /**
@@ -619,6 +638,14 @@ export class ComputerRuntime {
         maxPixels: options.maxPixels ?? this.config.screenshot.maxPixels,
         format,
         quality: this.config.screenshot.jpegQuality,
+        // grid / mark / dim are expressed in IMAGE space - the same space the
+        // model reads coordinates in - so they are forwarded without conversion.
+        grid: options.grid === true,
+        gridStep: Number.isFinite(Number(options.gridStep)) ? Number(options.gridStep) : 0,
+        mark: options.mark ?? null,
+        dim: options.dim ?? null,
+        // compare: diff this capture against the previous one of the same target.
+        compare: options.compare === true,
       },
       { timeoutMs: this.config.screenshotTimeoutMs },
     )
@@ -635,7 +662,9 @@ export class ComputerRuntime {
       window: options.hwnd ? { hwnd: options.hwnd, bounds: { ...result.capture }, pid: result.window?.pid ?? null } : null,
     }
     this.lastView = view
-    const attached = await this.attachImage(result.image, view)
+    const attached = options.attach === false
+      ? { ref: null, savedPath: null, attached: false }
+      : { ...(await this.attachImage(result.image, view)), attached: true }
     const uiMode = options.uiSummary ?? this.config.uiSummary
     let ui = null
     if (uiMode !== 'none') {
@@ -649,9 +678,21 @@ export class ComputerRuntime {
       savedPath: attached.savedPath,
       view,
       cursor: result.cursor ?? null,
+      change: result.image?.change ?? null,
       fallback: result.fallback ?? null,
       ui,
     }
+  }
+
+  /**
+   * Turn the host's frame-diff record into one sentence the model can act on.
+   * "The click did nothing" is the single most useful thing a screenshot taken
+   * after an action can say, so it is phrased as a verdict, not as a statistic.
+   * @param change - the `change` object from the host, or null.
+   * @returns {string[]} zero or more lines to append to the capture summary.
+   */
+  static describeChange(change) {
+    return describeChange(change)
   }
 
   /**
@@ -673,6 +714,7 @@ export class ComputerRuntime {
       const iy = Math.round((result.cursor.y - view.capture.y) * view.scale)
       lines.push(`Cursor: physical (${result.cursor.x},${result.cursor.y}) = image (${ix},${iy}).`)
     }
+    lines.push(...describeChange(result.image?.change ?? null))
     if (result.fallback === 'screen') lines.push('Note: the requested window could not be captured directly, so the whole display was captured instead.')
     if (this.config.skillsHint) {
       const hint = this.skillHint(result.foreground)
@@ -814,7 +856,6 @@ export class ComputerRuntime {
   /** Release the Windows host and the overlay. Never throws. */
   async dispose() {
     await this.disarmOverlay().catch(() => {})
-    if (this.ocrHost) await this.ocrHost.close().catch(() => {})
     if (this.ocrHost) await this.ocrHost.close().catch(() => {})
     const host = this.host
     this.host = null

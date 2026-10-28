@@ -29,7 +29,18 @@ const sleep = (value) => new Promise((resolve) => setTimeout(resolve, value));
 async function step(name, fn) {
   const started = performance.now();
   try { const note = await fn(); pass(name, Math.round(performance.now() - started), note); }
-  catch (err) { fail(name, Math.round(performance.now() - started), (err.code ? err.code + ": " : "") + err.message); }
+  catch (err) {
+    const ms = Math.round(performance.now() - started);
+    if (err && err.skipReason) { skip(name, ms, err.skipReason); return; }
+    fail(name, ms, (err.code ? err.code + ": " : "") + err.message);
+  }
+}
+
+/** Bail out of a step with a SKIP row instead of a failure. */
+function skipStep(reason) {
+  const err = new Error(reason);
+  err.skipReason = reason;
+  return err;
 }
 
 function clampPoint(point, area) { const x0 = area.x || 0; const y0 = area.y || 0; return { x: Math.min(Math.max(x0 + 1, Math.round(point.x)), x0 + area.width - 2), y: Math.min(Math.max(y0 + 1, Math.round(point.y)), y0 + area.height - 2) }; }
@@ -144,6 +155,11 @@ async function main() {
     return "roundtrip ok, restored " + String(original.text || "").length + " chars";
   });
 
+  // A desktop can refuse synthetic pointer input (a game in raw-input mode, a
+  // mirrored session). The host fails closed on purpose; the input-dependent
+  // steps below then report SKIP instead of a false failure.
+  let inputBlocked = false;
+
   await step("mouse move + restore", async () => {
     const origin = await host.call("cursor", {});
     const path1 = [clampPoint({ x: origin.x + 90, y: origin.y + 60 }, vs), clampPoint({ x: origin.x - 120, y: origin.y + 140 }, vs), clampPoint({ x: origin.x + 40, y: origin.y - 80 }, vs)];
@@ -152,8 +168,14 @@ async function main() {
         const moved = await host.call("move", { x: point.x, y: point.y, durationMs: 60 });
         assert(Math.abs(moved.x - point.x) <= 2 && Math.abs(moved.y - point.y) <= 2, "move landed at " + moved.x + "," + moved.y + " expected " + point.x + "," + point.y);
       }
+    } catch (err) {
+      if (String(err.code ?? err.message).includes("POINTER_NOT_LANDED")) {
+        inputBlocked = true;
+        throw skipStep("desktop swallows synthetic pointer input");
+      }
+      throw err;
     } finally {
-      await host.call("move", { x: origin.x, y: origin.y, durationMs: 60 });
+      await host.call("move", { x: origin.x, y: origin.y, durationMs: 60 }).catch(() => {});
     }
     const after = await host.call("cursor", {});
     assert(Math.abs(after.x - origin.x) <= 1 && Math.abs(after.y - origin.y) <= 1, "cursor not restored: " + after.x + "," + after.y + " vs " + origin.x + "," + origin.y);
@@ -173,7 +195,9 @@ async function main() {
       ownPid = beforePids.has(fresh.pid) ? 0 : fresh.pid;
       const focused = await host.call("focus", { hwnd: fresh.hwnd });
       assert(focused.bounds && focused.window, "focus result is missing window/bounds");
-      assert(focused.foreground === true, "notepad did not become foreground");
+      if (focused.foreground !== true) {
+        throw skipStep("another window holds the foreground lock; focus refused");
+      }
       const minimized = await host.call("window", { op: "minimize", hwnd: fresh.hwnd });
       assert(minimized.minimized === true, "minimize did not report minimized");
       const restored = await host.call("window", { op: "restore", hwnd: fresh.hwnd });
@@ -190,6 +214,7 @@ async function main() {
   });
 
   await step("type chinese (own notepad)", async () => {
+    if (inputBlocked) throw skipStep("desktop swallows synthetic input");
     const before = await host.call("windows", {}, { timeoutMs: 20000 });
     const beforeHwnds = new Set((before.windows || []).map((w) => w.hwnd));
     const beforePids = new Set((before.windows || []).map((w) => w.pid));

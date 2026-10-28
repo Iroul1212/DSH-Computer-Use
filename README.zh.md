@@ -116,7 +116,7 @@ pwsh -NoProfile -File scripts\uninstall.ps1 -Profile web
 如果目标是一个有可见文字的控件而不是窗口（`ui_element` `{ action: "find", nameContains: "保存" }` → `ui_element` `{ action: "invoke", path: "0/2/1" }`），agent 通常会优先选这条路而不是坐标：它不怕布局变化，纯文本模型也能用。
 ## Tools（工具参考）
 
-五个工具，**共 36 个 action**（`computer` 14、`app_window` 7、`ui_element` 8、`clipboard` 2、`app_skill` 5）。所有 mutating 调用都额外支持 `observe: true`，它会在同一个结果里追加快照截图（省一个来回）。`clipboard` 与 `app_skill` 没有 `observe`。
+五个工具，**共 38 个 action**（`computer` 16、`app_window` 7、`ui_element` 8、`clipboard` 2、`app_skill` 5）。所有 mutating 调用都额外支持 `observe: true`（追加快照截图）或 `verify: true`（再截一张、只回画面有没有变和变化区域，不附件图片）。`clipboard` 与 `app_skill` 两者都没有。
 
 每个工具都返回一个规范化 JSON 对象；`output.render` 把它投影成 `[text block, 可选 image block]`，image block 携带的是附件引用（`image`），绝不是字节。
 
@@ -128,7 +128,7 @@ pwsh -NoProfile -File scripts\uninstall.ps1 -Profile web
 
 | action | 类别 | 用到的参数 | 返回什么 |
 |---|---|---|---|
-| `screenshot` | 读 | `screen`、`hwnd`、`region`、`maxWidth`、`uiSummary` | `text`（文字信封：坐标映射系数、光标的物理/图像坐标、前台窗口、UI Automation 大纲）、`image`（附件引用或 `null`）、`savedPath`、`view`（`width`、`height`、`scale`、`capture`、`screen`、`at`）、`cursor`、`fallback`、`ui` |
+| `screenshot` | 读 | `screen`、`hwnd`、`region`、`maxWidth`、`uiSummary`、`grid`、`gridStep`、`mark`、`dim`、`compare` | `text`（文字信封：坐标映射系数、光标的物理/图像坐标、前台窗口、UI Automation 大纲）、`image`（附件引用或 `null`）、`savedPath`、`view`（`width`、`height`、`scale`、`capture`、`screen`、`at`）、`cursor`、`fallback`、`ui` |
 | `cursor` | 读 | — | `cursor` `{x,y}`（物理像素），以及同一个点在上一张截图里的坐标 |
 | `status` | 读 | — | 文本：host 状态、overlay 显示/隐藏、Esc 状态、dry run 开关、已执行的 mutating 动作数、坐标空间 |
 | `move` | **mutating** | `x`、`y` | 指针被移动到的物理 `{x,y}` |
@@ -162,7 +162,30 @@ pwsh -NoProfile -File scripts\uninstall.ps1 -Profile web
 | `region` | object `{x,y,width,height}`（四项都必填，integer） | 否 | 抓一个物理像素矩形。 |
 | `maxWidth` | integer | 否 | 本次截图的最大宽度（覆盖 `screenshot.maxWidth`）。 |
 | `uiSummary` | `none` / `summary` / `tree` | 否 | 图旁附带的 UI Automation 文本详细程度。 |
-| `observe` | boolean | 否 | 在结果里追加快照截图。 |
+| `compare` | boolean | 否 | 和同一目标（窗口 / 屏幕）的上一次截图做像素比对，返回 `change` 对象。 |
+| `grid` | boolean | 否 | 在图上画带坐标标注的网格；标注就是图像空间坐标，可以直接喂给 `click`。 |
+| `gridStep` | integer | 否 | 网格间距（图像像素），默认约宽度的 1/10 并对齐到 50。 |
+| `mark` | object `{x,y}` | 否 | 在某个图像坐标画十字准星——下一次点击就落在这里。 |
+| `dim` | object `{x,y,width,height}` | 否 | 把这个图像矩形之外全部压暗，突出一个区域。 |
+| `verify` | boolean | 否 | 仅 mutating 动作：动作后再截一张，回报 `change`，但不附件图片。 |
+| `observe` | boolean | 否 | 在结果里追加快照截图（隐含 `compare`）。 |
+
+#### 到底做成了没有：`verify` 与 `observe`
+
+每次截图都会顺手更新该目标的一张小尺寸签名，所以「模型刚刚看过的那张图」就是下一次动作的比对基准。桌面 agent 最常见的失败——点了没反应，于是再点一次——因此变成可验证的一步：
+
+```jsonc
+{ action: "click", x: 420, y: 260, verify: true }
+// -> Clicked left at image (420,260) = physical (1099,680)。
+//    Screen verdict: NO visible change since the previous capture (0.0% of sampled pixels differ)。
+//    如果这跟在某个动作之后，说明那个动作大概率没生效——重看截图，别重复点。
+```
+
+`verify` 只花一次截图（约 150 ms）、不花图片 token；`observe` 是同一次截图再加一张附件图。网格和标记是在比对**之后**才画上去的，所以带装饰的截图永远不会被算成「画面变了」，也不会成为下一次比对的基准。
+
+#### 光标回执
+
+`move`、`click`、`drag`、`scroll` 都会返回一份从 `GetCursorPos` 读回来的 `pointer` 回执（`{x, y, requestedX, requestedY, drift, landed}`），而且每次移动都会被校验：如果 `SendInput` 收下了事件但指针没到目标点，宿主会先用 `SetCursorPos` 补救一次；仍然不行就以 `POINTER_NOT_LANDED` 失败，而不是在别的地方点下去。对电脑操作 agent 来说，悄悄点偏是唯一不能容忍的失败。
 
 ### `app_window` —— 真实窗口
 
@@ -437,7 +460,7 @@ DSH 宿主进程（Node）
 
 ## Testing（测试）
 
-六个 Node 套件。不需要构建，也不需要全局安装：
+七个 Node 套件。不需要构建，也不需要全局安装：
 
 ```powershell
 npm test                      # 全部 5 个套件
@@ -445,7 +468,8 @@ npm run test:schema           # 工具定义是否落在宿主强制的 JSON Sch
 npm run test:plugin           # 插件入口 + 5 个工具注册 + 真机截图与窗口列表
 npm run test:skills           # 用户可写层的 15 条断言（save / append / remove / overwrite / 上限），全部跑在临时目录
 npm run test:safety           # 10 条安全契约（dry run / overlay / Esc / resume 冷却 / blocklist / guard-exited 与 host-exited 均 fail closed）
-npm run test:overlay          # overlay 子进程 + 真实 Esc 注入
+npm run test:overlay          # overlay 子进程 + 真实 Esc 注入（桌面吞掉合成输入时自动 SKIP）
+npm run test:observe          # grid / mark / dim、compare+verify 背后的帧比对、以及 POINTER_NOT_LANDED 的失败关闭路径
 npm run smoke                 # Windows 宿主 11 步端到端（截图 / 中文输入 / 窗口操作 / 性能）
 ```
 
