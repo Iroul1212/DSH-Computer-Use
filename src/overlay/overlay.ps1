@@ -355,13 +355,14 @@ namespace DshOverlay
 
         void BuildPill()
         {
-            // "COMPUTER USE" chip plus the deployment's own message, so the label is
-            // always the same word a user can search for, whatever the message says.
+            // Deliberately NOT a capsule: just a dot, the label and the message,
+            // floating on the desktop with a soft shadow. Nothing to look at except
+            // the two words that matter.
             string message = Message;
             if (string.IsNullOrEmpty(message)) message = "正在操控你的电脑 · 按 Esc 停止";
             string label = "COMPUTER USE";
 
-            float labelSize = 9.5f * _s;
+            float labelSize = 10f * _s;
             float msgSize = 10.5f * _s;
             using (Font labelFont = new Font("Segoe UI", labelSize, FontStyle.Bold, GraphicsUnit.Point))
             using (Font msgFont = new Font("Microsoft YaHei UI", msgSize, FontStyle.Regular, GraphicsUnit.Point))
@@ -375,16 +376,15 @@ namespace DshOverlay
                     ms = pg.MeasureString(message, msgFont, new PointF(0, 0), StringFormat.GenericTypographic);
                 }
 
-                int padX = (int)Math.Round(14 * _s);
-                int padY = (int)Math.Round(7 * _s);
-                int dot = (int)Math.Round(8 * _s);
-                int gap = (int)Math.Round(9 * _s);
-                int sep = (int)Math.Round(12 * _s);
+                int pad = (int)Math.Round(4 * _s);
+                int dot = (int)Math.Round(7 * _s);
+                int gap = (int)Math.Round(8 * _s);
+                int sep = (int)Math.Round(11 * _s);
                 int textH = (int)Math.Ceiling(Math.Max(ls.Height, ms.Height)) + 1;
-                int ph = textH + padY * 2;
-                int pw = padX * 2 + dot + gap + (int)Math.Ceiling(ls.Width) + sep + (int)Math.Ceiling(ms.Width);
-                if (pw < 60) pw = 60;
-                if (ph < 22) ph = 22;
+                int ph = textH + pad * 2;
+                int pw = pad * 2 + dot + gap + (int)Math.Ceiling(ls.Width) + sep + (int)Math.Ceiling(ms.Width);
+                if (pw < 40) pw = 40;
+                if (ph < 18) ph = 18;
 
                 _pillLayer = new Bitmap(pw, ph, PixelFormat.Format32bppArgb);
                 using (Graphics g = Graphics.FromImage(_pillLayer))
@@ -393,21 +393,12 @@ namespace DshOverlay
                     g.SmoothingMode = SmoothingMode.AntiAlias;
                     g.TextRenderingHint = TextRenderingHint.AntiAlias;
 
-                    int bgA = (int)Math.Round(226 * GlowOpacity);
-                    int fgA = (int)Math.Round(246 * GlowOpacity);
-                    int bdA = (int)Math.Round(235 * GlowOpacity);
-
-                    using (GraphicsPath path = RoundRect(new RectangleF(0.5f, 0.5f, pw - 1f, ph - 1f), ph / 2f))
-                    {
-                        using (SolidBrush b = new SolidBrush(Color.FromArgb(bgA, 12, 14, 22))) g.FillPath(b, path);
-                        using (Pen pen = new Pen(Color.FromArgb(bdA, 56, 138, 255), Math.Max(1.2f, 1.6f * _s))) g.DrawPath(pen, path);
-                    }
-
+                    int fgA = (int)Math.Round(250 * GlowOpacity);
                     float cy = ph / 2f;
-                    float cx = padX + dot / 2f;
-                    using (SolidBrush halo = new SolidBrush(Color.FromArgb((int)Math.Round(70 * GlowOpacity), 60, 150, 255)))
+                    float cx = pad + dot / 2f;
+                    using (SolidBrush halo = new SolidBrush(Color.FromArgb((int)Math.Round(90 * GlowOpacity), 60, 150, 255)))
                     { g.FillEllipse(halo, cx - dot, cy - dot, dot * 2f, dot * 2f); }
-                    using (SolidBrush db = new SolidBrush(Color.FromArgb((int)Math.Round(255 * GlowOpacity), 70, 160, 255)))
+                    using (SolidBrush db = new SolidBrush(Color.FromArgb((int)Math.Round(255 * GlowOpacity), 70, 165, 255)))
                     { g.FillEllipse(db, cx - dot / 2f, cy - dot / 2f, dot, dot); }
 
                     StringFormat sf = new StringFormat(StringFormat.GenericTypographic);
@@ -415,16 +406,27 @@ namespace DshOverlay
                     sf.Alignment = StringAlignment.Near;
                     sf.FormatFlags = StringFormatFlags.NoWrap | StringFormatFlags.NoClip;
 
-                    float tx = padX + dot + gap;
-                    using (SolidBrush lb = new SolidBrush(Color.FromArgb(fgA, 118, 190, 255)))
-                    { g.DrawString(label, labelFont, lb, new RectangleF(tx, 0f, ls.Width + 2, ph), sf); }
-                    tx += (float)Math.Ceiling(ls.Width) + sep;
-                    using (SolidBrush tb = new SolidBrush(Color.FromArgb(fgA, 235, 239, 247)))
-                    { g.DrawString(message, msgFont, tb, new RectangleF(tx, 0f, pw - tx - padX + 4, ph), sf); }
+                    float tx = pad + dot + gap;
+                    RectangleF labelRect = new RectangleF(tx, 0f, ls.Width + 2, ph);
+                    RectangleF msgRect = new RectangleF(tx + (float)Math.Ceiling(ls.Width) + sep, 0f, ms.Width + 6, ph);
+
+                    // One offset shadow pass: enough to stay readable on a light
+                    // wallpaper without putting a plate behind the text.
+                    using (SolidBrush shadow = new SolidBrush(Color.FromArgb((int)Math.Round(160 * GlowOpacity), 0, 0, 0)))
+                    {
+                        RectangleF lr2 = labelRect; lr2.Offset(1f, 1f);
+                        RectangleF mr2 = msgRect; mr2.Offset(1f, 1f);
+                        g.DrawString(label, labelFont, shadow, lr2, sf);
+                        g.DrawString(message, msgFont, shadow, mr2, sf);
+                    }
+                    using (SolidBrush lb = new SolidBrush(Color.FromArgb(fgA, 120, 195, 255)))
+                    { g.DrawString(label, labelFont, lb, labelRect, sf); }
+                    using (SolidBrush tb = new SolidBrush(Color.FromArgb(fgA, 240, 244, 250)))
+                    { g.DrawString(message, msgFont, tb, msgRect, sf); }
                 }
 
                 _pillX = (Width - pw) / 2;
-                _pillY = (int)Math.Round(30 * _s);
+                _pillY = (int)Math.Round(24 * _s);
             }
         }
 
