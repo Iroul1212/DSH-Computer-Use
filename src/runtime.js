@@ -38,6 +38,8 @@ export const CONFIG_DEFAULTS = {
   uiSummaryMaxChars: 4000,
   overlay: 'auto',
   overlayOpacity: 0.85,
+  // 'agent' = blue arrow + pointer halo, 'halo' = halo only, 'off' = neither.
+  cursor: 'agent',
   overlayMessage: 'DeepSeek Harness is controlling your computer - press Esc to stop',
   escStop: true,
   dryRun: false,
@@ -119,6 +121,7 @@ export function normalizeConfig(raw) {
     uiSummary: oneOf(input.uiSummary, ['none', 'summary', 'tree'], 'summary'),
     overlay: oneOf(input.overlay, ['auto', 'always', 'never'], 'auto'),
     overlayOpacity: num(input.overlayOpacity, 0.85, 0.05, 1),
+    cursor: oneOf(input.cursor, ['agent', 'halo', 'off'], 'agent'),
     escStop: input.escStop !== false,
     dryRun: input.dryRun === true,
     requireApproval: oneOf(input.requireApproval, ['never', 'mutating'], 'never'),
@@ -454,6 +457,7 @@ export class ComputerRuntime {
       })
       this.overlayArmed = true
       this.guardState = 'armed'
+      await this.applyCursorStyle('agent')
     } catch (cause) {
       this.overlayError = String(cause?.message ?? cause)
       this.log('error', `overlay failed to arm: ${this.overlayError}`)
@@ -486,6 +490,8 @@ export class ComputerRuntime {
       await this.guard.disarm()
     } catch (cause) {
       this.log('error', `overlay failed to disarm: ${cause?.message ?? cause}`)
+    } finally {
+      await this.applyCursorStyle('system')
     }
   }
 
@@ -495,7 +501,27 @@ export class ComputerRuntime {
    * decision by the human, so a tripped runtime never resumes itself).
    * @param payload - the guard's abort payload.
    */
+  /**
+   * Swap the system arrow for the blue computer-use cursor ('agent') or put the
+   * user's own cursor scheme back ('system'). Best effort: a pointer style is
+   * decoration, so a failure here must never block an action.
+   * @param mode - 'agent' or 'system'.
+   * @returns {Promise<void>}
+   */
+  async applyCursorStyle(mode) {
+    if (this.config.cursor !== 'agent') return
+    try {
+      // Straight to the host: going through call() would re-arm the overlay in
+      // 'always' mode, which is exactly what we are trying to take down here.
+      const host = await this.ensureHost()
+      await host.call('cursorstyle', { mode })
+    } catch (cause) {
+      this.log('warn', `cursor style ${mode} failed: ${cause?.message ?? cause}`)
+    }
+  }
+
   handleEsc(payload) {
+    void this.applyCursorStyle('system')
     const at = new Date().toISOString()
     this.tripped = { reason: payload?.reason ?? 'escape', at: payload?.at ?? at }
     this.overlayArmed = false
@@ -873,6 +899,7 @@ export class ComputerRuntime {
 
   /** Release the Windows host and the overlay. Never throws. */
   async dispose() {
+    await this.applyCursorStyle('system').catch(() => {})
     await this.disarmOverlay().catch(() => {})
     if (this.ocrHost) await this.ocrHost.close().catch(() => {})
     const host = this.host

@@ -174,6 +174,13 @@ public static class DshWin32
     public static extern bool GetCursorPos(out POINT p);
     [DllImport("user32.dll", SetLastError = true)]
     public static extern bool SetCursorPos(int x, int y);
+    // ---- imports: system cursor (computer-use pointer) --------------------
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern IntPtr LoadCursorFromFileW(string path);
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool SetSystemCursor(IntPtr hcur, uint id);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern bool SystemParametersInfoW(uint uiAction, uint uiParam, IntPtr pvParam, uint fWinIni);
     [DllImport("user32.dll")]
     public static extern short GetAsyncKeyState(int vKey);
     [DllImport("user32.dll", SetLastError = true)]
@@ -860,6 +867,82 @@ function Invoke-Cmd-Screenshot($a) {
     }
     if ($null -ne $fallback) { $result['fallback'] = $fallback }
     return $result
+}
+
+function New-AgentCursorFile {
+    # A blue-tinted arrow, written as a .cur (PNG payload; Vista+ accepts that).
+    # The hotspot stays at the tip so the cursor still points where it points.
+    $path = Join-Path $env:TEMP 'dsh-computer-use-agent.cur'
+    if (Test-Path $path) { return $path }
+    $bmp = New-Object System.Drawing.Bitmap 32, 32, ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+    try {
+        $g = [System.Drawing.Graphics]::FromImage($bmp)
+        try {
+            $g.Clear([System.Drawing.Color]::Transparent)
+            $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+            [System.Drawing.Point[]]$pts = @(
+                [System.Drawing.Point]::new(1, 1),
+                [System.Drawing.Point]::new(1, 24),
+                [System.Drawing.Point]::new(7, 18),
+                [System.Drawing.Point]::new(11, 29),
+                [System.Drawing.Point]::new(16, 27),
+                [System.Drawing.Point]::new(12, 16),
+                [System.Drawing.Point]::new(20, 16)
+            )
+            $shape = New-Object System.Drawing.Drawing2D.GraphicsPath
+            $shape.AddPolygon($pts)
+            $glow = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(110, 56, 132, 255)), 5
+            $outline = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(255, 40, 110, 235)), 2
+            $fill = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 236, 244, 255))
+            try {
+                $g.DrawPath($glow, $shape)
+                $g.FillPath($fill, $shape)
+                $g.DrawPath($outline, $shape)
+            } finally { $glow.Dispose(); $outline.Dispose(); $fill.Dispose(); $shape.Dispose() }
+        } finally { $g.Dispose() }
+        $ms = New-Object System.IO.MemoryStream
+        try {
+            $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
+            $png = $ms.ToArray()
+        } finally { $ms.Dispose() }
+    } finally { $bmp.Dispose() }
+    $fs = [System.IO.File]::Create($path)
+    try {
+        $bw = New-Object System.IO.BinaryWriter $fs
+        try {
+            $bw.Write([uint16]0)          # reserved
+            $bw.Write([uint16]2)          # type: cursor
+            $bw.Write([uint16]1)          # one image
+            $bw.Write([byte]32)           # width
+            $bw.Write([byte]32)           # height
+            $bw.Write([byte]0)            # colour count
+            $bw.Write([byte]0)            # reserved
+            $bw.Write([uint16]1)          # hotspot x (arrow tip)
+            $bw.Write([uint16]1)          # hotspot y
+            $bw.Write([uint32]$png.Length)
+            $bw.Write([uint32]22)         # offset: 6 + 16
+            $bw.Write($png)
+        } finally { $bw.Dispose() }
+    } finally { $fs.Dispose() }
+    return $path
+}
+
+function Invoke-Cmd-CursorStyle($a) {
+    # 'agent' swaps the normal arrow for the blue computer-use arrow (system wide);
+    # 'system' puts the user's own cursor scheme back. The overlay process and the
+    # runtime both call 'system' on the way out, so a killed overlay cannot leave
+    # the desktop with a strange pointer.
+    $mode = [string](Get-Arg $a 'mode' 'agent')
+    if ($mode -eq 'system') {
+        $ok = [bool][DshWin32]::SystemParametersInfoW(0x0057, 0, [IntPtr]::Zero, 0)
+        return [ordered]@{ mode = 'system'; restored = $ok }
+    }
+    if ($mode -ne 'agent') { Fail 'BAD_ARGS' ("unknown cursor style: " + $mode) }
+    $cur = New-AgentCursorFile
+    $h = [DshWin32]::LoadCursorFromFileW($cur)
+    if ($h -eq [IntPtr]::Zero) { Fail 'CURSOR_STYLE_FAILED' ("LoadCursorFromFile failed for " + $cur) }
+    $ok = [bool][DshWin32]::SetSystemCursor($h, 32512)   # OCR_NORMAL
+    return [ordered]@{ mode = 'agent'; applied = $ok; file = $cur }
 }
 
 function Invoke-Cmd-Cursor($a) {
@@ -1719,6 +1802,7 @@ function Invoke-HostCommand {
         'uiaAct'     { return (Invoke-Cmd-UiaAct $Args_) }
         'clipboard'  { return (Invoke-Cmd-Clipboard $Args_) }
         'guard'      { return (Invoke-Cmd-Guard $Args_) }
+        'cursorstyle' { return (Invoke-Cmd-CursorStyle $Args_) }
         'shutdown'   { return [ordered]@{ ok = $true } }
         default { Fail 'UNKNOWN_CMD' ("unknown command: " + $Cmd) }
     }

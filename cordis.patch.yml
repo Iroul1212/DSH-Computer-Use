@@ -28,6 +28,13 @@
         # 'always' keeps it up for the whole session, 'never' disables it.
         overlay: auto
         overlayMessage: 'DeepSeek Harness 正在操控你的电脑 · 按 Esc 停止'
+
+        # The pointer while computer use is active:
+        #   agent - blue arrow replaces the system arrow + a blue ring follows it
+        #   halo  - ring only, the system cursor is left alone
+        #   off   - no pointer decoration
+        # The system cursor is always restored when the indicator goes away.
+        cursor: agent
         # Global Esc kill switch. When tripped, every mutating action fails
         # until the model calls computer with action "resume".
         escStop: true

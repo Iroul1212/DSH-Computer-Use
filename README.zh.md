@@ -407,7 +407,7 @@ bundle 在 `cordis.patch.yml` 里只有一行，其余全部是这一行的 `con
 | 门 | 行为 |
 |---|---|
 | **Esc 急停** | overlay 武装期间，全局 Esc（边沿触发，用 `GetAsyncKeyState` 轮询，**不用** `RegisterHotKey`，所以不抢别的程序的热键）会 trip 守卫。此后每个 mutating 动作都以 `STOPPED_BY_HUMAN` 失败。只有 `computer` `{ "action": "resume" }` 能清除，且必须在 Esc 之后 5 秒以上（否则 `RESUME_TOO_SOON`）—— 模型没法悄悄自己恢复。 |
-| **overlay** | 一个 click 穿透、从不抢前台、不出现在 Alt-Tab 的 WinForms 层：一圈半透明呼吸光晕 + 一个带 `overlayMessage` 的药丸。鼠标事件直接穿过去（`WS_EX_TRANSPARENT` + `HTTRANSPARENT`），所以这个提示既吃不掉 agent 自己的点击，也吃不掉你的。 |
+| **Overlay** | 点击穿透、永不抢焦点、Alt-Tab 不可见的 WinForms 图层：屏幕四周是**蓝色荧光**，顶部一个 `COMPUTER USE` 胶囊（旁边是 `overlayMessage`），路过的人一眼就能看出正在被 AI 操作。指针同样一眼可辨：系统箭头换成**蓝色箭头**，并有一个脉动的蓝色**圆环**跟随光标（`cursor: agent`；`halo` 保留你原来的箭头；`off` 全关）。鼠标事件直接穿透（`WS_EX_TRANSPARENT` + `HTTRANSPARENT`），指示器永远不会吃掉 agent 自己的点击；指示器一消失，系统光标方案立刻恢复。 |
 | **意外死亡也会冻结** | 指示器进程意外退出（不是 Esc、也不是正常 disarm）会把 kill switch 置为 `guard-exited`；自动化宿主进程意外死亡会置为 `host-exited`。两种情况下**所有 mutating 动作立刻 fail closed**，只读动作照常可用（screenshot、status、`app_window` `list`、`ui_element` `tree`），要恢复必须显式 `resume` —— 同样带 5 秒冷却，好让人先看到那条消息。 |
 | **`overlay: always` 的准确语义** | 任何桌面调用都会点亮指示器，包括只读的截图和查光标。默认的 `auto` 只在 mutating 动作期间点亮，空闲 `idleDisarmMs` 之后自动熄灭。 |
 | **过期的观测会被拒** | 截图绑定到某个窗口（`computer` 带 `hwnd`）之后，每次 mutating 动作前都会核对那个窗口：窗口没了 → `TARGET_WINDOW_GONE`，pid 变了（应用重启过）→ `TARGET_WINDOW_CHANGED`，位置或尺寸有变化 → `TARGET_WINDOW_MOVED`。这三种情况都**不会执行任何动作**；重新截图、重新推导目标后再来。 |
