@@ -246,6 +246,7 @@ export function createComputerTool(runtime, config) {
           const where = target.x === null ? 'the current pointer position' : `physical (${target.x},${target.y})`
           const gate = await runtime.beforeMutation('computer', `${action} ${button} on ${where}`)
           if (gate.dryRun) return { action, ok: true, dryRun: true, text: `[dry run] Would ${action} ${button} on ${where}.` }
+          if (target.x !== null) await runtime.assertPointerTarget(target.x, target.y)
           const result = await runtime.call('click', { x: target.x, y: target.y, button, count, modifiers: args.modifiers ?? [] })
           return await afterAction(runtime, args, action, `${action === 'click' ? 'Clicked' : action.replace('_', ' ')} ${button}${count > 1 ? ` x${count}` : ''} at image (${args.x ?? '-'},${args.y ?? '-'}) = physical (${result.x},${result.y}).`, { pointer: result.pointer ?? null })
         }
@@ -255,6 +256,8 @@ export function createComputerTool(runtime, config) {
           if (from.x === null || to.x === null) throw new ToolError('MISSING_COORDINATES', '`drag` needs x/y (start) and toX/toY (end).')
           const gate = await runtime.beforeMutation('computer', `drag from physical (${from.x},${from.y}) to (${to.x},${to.y})`)
           if (gate.dryRun) return { action, ok: true, dryRun: true, text: `[dry run] Would drag from physical (${from.x},${from.y}) to (${to.x},${to.y}).` }
+          await runtime.assertPointerTarget(from.x, from.y)
+          await runtime.assertPointerTarget(to.x, to.y)
           const result = await runtime.call('drag', { from, to, button: args.button ?? 'left', durationMs: 350, modifiers: args.modifiers ?? [] })
           return await afterAction(runtime, args, action, `Dragged from physical (${result.from.x},${result.from.y}) to (${result.to.x},${result.to.y}).`, { pointer: result.pointer ?? null })
         }
@@ -265,6 +268,7 @@ export function createComputerTool(runtime, config) {
           if (dy === 0 && dx === 0) throw new ToolError('MISSING_SCROLL_AMOUNT', '`scroll` needs a non-zero `dy` (vertical notches) and/or `dx`.')
           const gate = await runtime.beforeMutation('computer', `scroll dy=${dy} dx=${dx} at physical (${target.x ?? 'cursor'},${target.y ?? 'cursor'})`)
           if (gate.dryRun) return { action, ok: true, dryRun: true, text: `[dry run] Would scroll dy=${dy} dx=${dx}.` }
+          if (target.x !== null) await runtime.assertPointerTarget(target.x, target.y)
           const result = await runtime.call('scroll', { x: target.x, y: target.y, dy: dy * 120, dx: dx * 120, modifiers: args.modifiers ?? [] })
           return await afterAction(runtime, args, action, `Scrolled dy=${dy} dx=${dx} notches at physical (${result.x},${result.y}).`, { pointer: result.pointer ?? null })
         }
@@ -597,10 +601,24 @@ export function createAppWindowTool(runtime, config) {
           const label = 'focus window ' + (target ? windowLabel(target) : '(the foreground window)')
           const gate = await runtime.beforeMutation('app_window', label, exec)
           if (gate.dryRun) return { action, ok: true, dryRun: true, text: '[dry run] Would ' + label + '.', window: target }
-          const result = await runtime.call('focus', {
+          let result = await runtime.call('focus', {
             hwnd: target ? target.hwnd : null,
             titleMatch: target ? null : typeof args.titleMatch === 'string' ? args.titleMatch : null,
           })
+          // SetForegroundWindow can be refused when another app holds the foreground
+          // lock. Try once more, then say so instead of pretending the window is in
+          // front - every click after a fake focus lands in the wrong window.
+          if (result?.foreground !== true) {
+            await new Promise((resolve) => setTimeout(resolve, 250))
+            try { result = await runtime.call('focus', { hwnd: target ? target.hwnd : null, titleMatch: target ? null : typeof args.titleMatch === 'string' ? args.titleMatch : null }) } catch { /* keep the first result */ }
+          }
+          if (result?.foreground !== true) {
+            const blocker = result?.foregroundWindow ?? result?.window ?? null
+            throw new ToolError(
+              'FOCUS_REFUSED',
+              `Windows would not give the foreground to ${windowLabel(target ?? result?.window)} - another window (often the app you are chatting in) still holds the foreground lock, so a click now would land there instead. Minimise the other window, or tell the human to bring ${target?.title ?? 'the target window'} to the front, then retry.`,
+            )
+          }
           const window = result?.window ?? result
           const value = {
             action,

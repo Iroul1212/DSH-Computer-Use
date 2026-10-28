@@ -174,6 +174,9 @@ public static class DshWin32
     public static extern bool GetCursorPos(out POINT p);
     [DllImport("user32.dll", SetLastError = true)]
     public static extern bool SetCursorPos(int x, int y);
+    // ---- imports: hit testing -------------------------------------------
+    [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT p);
+    [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
     // ---- imports: system cursor (computer-use pointer) --------------------
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     public static extern IntPtr LoadCursorFromFileW(string path);
@@ -865,6 +868,15 @@ function Invoke-Cmd-Screenshot($a) {
         maxPixels = $maxPixels
         elapsedMs = [int]$sw.ElapsedMilliseconds
     }
+    if ($null -ne $hwnd) {
+        # The caller needs the captured window's identity to check that a later
+        # click would land in the same application.
+        $result['window'] = [ordered]@{
+            hwnd = [int64]$hwnd
+            pid  = (Get-WindowProcessId ([IntPtr][int64]$hwnd))
+            title = (Get-WindowTitle ([IntPtr][int64]$hwnd))
+        }
+    }
     if ($null -ne $fallback) { $result['fallback'] = $fallback }
     return $result
 }
@@ -927,6 +939,38 @@ function New-AgentCursorFile {
     return $path
 }
 
+function Invoke-Cmd-WindowAt($a) {
+    # Which top-level window would receive a click at this physical point? A click
+    # that lands on a different application is the one failure a computer-use agent
+    # must not have, so the caller compares this against what it meant to hit.
+    try {
+        $x = Get-IntArg $a 'x' ([int]::MinValue)
+        $y = Get-IntArg $a 'y' ([int]::MinValue)
+        if ($x -eq [int]::MinValue -or $y -eq [int]::MinValue) { Fail 'BAD_ARGS' 'windowAt needs integer x and y' }
+        $pt = New-Object 'DshWin32+POINT'
+        $pt.x = [int]$x
+        $pt.y = [int]$y
+        $h = [DshWin32]::WindowFromPoint($pt)
+        if ($h -eq [IntPtr]::Zero) { return [ordered]@{ hwnd = $null; title = $null; process = $null; pid = $null } }
+        $root = [DshWin32]::GetAncestor($h, 2)
+        if ($root -ne [IntPtr]::Zero) { $h = $root }
+        $procId = Get-WindowProcessId $h
+        $procName = $null
+        if ($procId -gt 0) {
+            $p = Get-Process -Id $procId -ErrorAction SilentlyContinue
+            if ($null -ne $p) { $procName = $p.ProcessName }
+        }
+        return [ordered]@{
+            hwnd    = [int64]$h
+            title   = (Get-WindowTitle $h)
+            class   = (Get-WindowClass $h)
+            process = $procName
+            pid     = $procId
+        }
+    } catch {
+        Fail 'WINDOWAT_FAILED' ($_.Exception.Message)
+    }
+}
 function Invoke-Cmd-CursorStyle($a) {
     # 'agent' swaps the normal arrow for the blue computer-use arrow (system wide);
     # 'system' puts the user's own cursor scheme back. The overlay process and the
@@ -1803,6 +1847,7 @@ function Invoke-HostCommand {
         'clipboard'  { return (Invoke-Cmd-Clipboard $Args_) }
         'guard'      { return (Invoke-Cmd-Guard $Args_) }
         'cursorstyle' { return (Invoke-Cmd-CursorStyle $Args_) }
+        'windowat'   { return (Invoke-Cmd-WindowAt $Args_) }
         'shutdown'   { return [ordered]@{ ok = $true } }
         default { Fail 'UNKNOWN_CMD' ("unknown command: " + $Cmd) }
     }

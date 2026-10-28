@@ -40,6 +40,9 @@ export const CONFIG_DEFAULTS = {
   overlayOpacity: 0.85,
   // 'agent' = blue arrow + pointer halo, 'halo' = halo only, 'off' = neither.
   cursor: 'agent',
+  // 'fail' = refuse a click aimed at another application, 'warn' = log only,
+  // 'off' = trust the coordinates. See assertClickTarget().
+  hitTest: 'fail',
   overlayMessage: 'DeepSeek Harness is controlling your computer - press Esc to stop',
   escStop: true,
   dryRun: false,
@@ -122,6 +125,7 @@ export function normalizeConfig(raw) {
     overlay: oneOf(input.overlay, ['auto', 'always', 'never'], 'auto'),
     overlayOpacity: num(input.overlayOpacity, 0.85, 0.05, 1),
     cursor: oneOf(input.cursor, ['agent', 'halo', 'off'], 'agent'),
+    hitTest: oneOf(input.hitTest, ['fail', 'warn', 'off'], 'fail'),
     escStop: input.escStop !== false,
     dryRun: input.dryRun === true,
     requireApproval: oneOf(input.requireApproval, ['never', 'mutating'], 'never'),
@@ -555,6 +559,60 @@ export class ComputerRuntime {
    * @param exec - the tool execution context (for approval correlation).
    * @returns {Promise<{dryRun:boolean}>}
    */
+  /**
+   * Refuse a click that would land on a different application than the one the
+   * last screenshot was taken of. Synthetic input is delivered to whatever is
+   * under the point `right now`; when another window has stolen the foreground
+   * the click silently goes there instead, which is the single worst failure a
+   * computer-use agent can have. Verified through the host with WindowFromPoint.
+   * @param x - physical x of the point about to be clicked.
+   * @param y - physical y.
+   * @returns {Promise<object|null>} the window that would receive the click, or null.
+   */
+  /**
+   * Both pointer guards in one call: the point must be inside the window the last
+   * screenshot was taken of, and the application under it must be that same
+   * application. Throws rather than clicking blind.
+   * @param x - physical x.
+   * @param y - physical y.
+   * @returns {Promise<object|null>} the window that would receive the click.
+   */
+  async assertPointerTarget(x, y) {
+    const bounds = this.lastView?.window?.bounds
+    if (bounds && (x < bounds.x || y < bounds.y || x >= bounds.x + bounds.width || y >= bounds.y + bounds.height)) {
+      throw new ToolError(
+        'OUTSIDE_TARGET_WINDOW',
+        `The point (${x},${y}) is outside "${this.lastView.window?.title ?? 'the window'}" ` +
+        `(${bounds.x},${bounds.y}) ${bounds.width}x${bounds.height}, which is the window the last screenshot was taken of. ` +
+        'Clicking or dragging outside it acts on whatever is underneath. Take a fresh screenshot of that window and use those coordinates, or capture the screen instead of a single window.',
+      )
+    }
+    return await this.assertClickTarget(x, y)
+  }
+
+  async assertClickTarget(x, y) {
+    if (this.config.hitTest === 'off') return null
+    if (!Number.isInteger(x) || !Number.isInteger(y)) return null
+    const view = this.lastView
+    // Only a window-pinned view names an application to compare against. A
+    // full-screen screenshot may legitimately be followed by a click on any app
+    // visible in it, so there is nothing to enforce there.
+    const expected = view?.window ?? null
+    if (!expected || !Number.isInteger(expected.pid)) return null
+    let at = null
+    try { at = await this.call('windowat', { x, y }) } catch { return null }
+    if (!at || !Number.isInteger(at.pid) || at.pid <= 0) return null
+    if (at.pid === expected.pid) return at
+    const target = `"${at.title || '(untitled)'}" [${at.process ?? '?'}]`
+    const wanted = `"${expected.title || 'the window you looked at'}" [${expected.process ?? '?'}]`
+    const message = `The point (${x},${y}) is over ${target}, not ${wanted}. Windows would deliver the click there, so nothing was clicked. Bring the intended window to the front (app_window action "focus") or take a fresh screenshot and pick a point inside it.`
+    if (this.config.hitTest === 'warn') {
+      this.log('warn', 'click target mismatch: ' + message)
+      return at
+    }
+    throw new ToolError('CLICK_WRONG_WINDOW', message)
+  }
+
   async beforeMutation(toolName, label, exec) {
     if (this.tripped) {
       throw new ToolError(

@@ -147,6 +147,7 @@ function makeFakeRuntime() {
     skillFor: () => null,
     toPhysical: (x, y) => ({ x: x == null ? null : Math.round(x / 0.5), y: y == null ? null : Math.round(y / 0.5) }),
     async beforeMutation() { return { dryRun: false } },
+    async assertPointerTarget() { return null },
     async call(cmd, args) { calls.push({ cmd, args }); return { x: 11, y: 22, chars: 3, from: { x: 1, y: 2 }, to: { x: 3, y: 4 } } },
     async capture(options = {}) {
       captures.push(options)

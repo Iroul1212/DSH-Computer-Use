@@ -35,6 +35,12 @@
         #   off   - no pointer decoration
         # The system cursor is always restored when the indicator goes away.
         cursor: agent
+
+        # Before a click/drag/scroll the plugin asks Windows which window is under
+        # the point and refuses the action when it belongs to another application
+        # than the one the last screenshot was of ('fail'), only logs it ('warn'),
+        # or trusts the coordinates ('off').
+        hitTest: fail
         # Global Esc kill switch. When tripped, every mutating action fails
         # until the model calls computer with action "resume".
         escStop: true
