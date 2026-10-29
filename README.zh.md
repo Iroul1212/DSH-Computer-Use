@@ -1,5 +1,7 @@
 # dsh-computer-use
 
+> [English](README.md) · **简体中文**
+
 **Codex 风格的 computer use for DeepSeek Harness** —— 让 agent 看见真实屏幕、驱动真实的鼠标键盘，并且始终有可见 overlay 与 Esc 急停。
 
 `dsh-computer-use` 是一个 DSH 插件 bundle。它注册五个面向模型的工具，用来操作你正在对话的这台真实桌面：`computer` 对齐 Codex 的 computer-use 动作面，另外四个（`app_window`、`ui_element`、`clipboard`、`app_skill`）补上"没有视觉也能可靠控制桌面"所必需的信道。

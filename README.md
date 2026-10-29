@@ -1,5 +1,7 @@
 # dsh-computer-use
 
+> **English** · [简体中文](README.zh.md)
+
 **Codex-style computer use for DeepSeek Harness** — let the agent see the real screen and drive the real mouse/keyboard on Windows, with a visible overlay and an Esc kill switch.
 
 `dsh-computer-use` is a DSH plugin bundle. It registers five model-facing tools that operate the actual desktop of the person you are talking to: a `computer` tool mirroring the Codex computer-use action surface, plus `app_window`, `ui_element`, `clipboard` and `app_skill` for the channels that make desktop control reliable without vision.
