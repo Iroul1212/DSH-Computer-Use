@@ -12,7 +12,7 @@ import path from 'node:path';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const OVERLAY_PS1 = path.join(HERE, 'overlay.ps1');
 
-export const DEFAULT_MESSAGE = 'DeepSeek Harness 正在操控你的电脑 · 按 Esc 停止';
+export const DEFAULT_MESSAGE = '正在computer use | 按Esc退出';
 export const READY_TIMEOUT_MS = 20000;
 
 /** Overlay indicator + global Esc kill-switch is only meaningful on Windows. */

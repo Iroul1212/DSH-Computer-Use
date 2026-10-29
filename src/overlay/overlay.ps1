@@ -4,7 +4,7 @@
 
   Standalone GUI process (WinForms). Draws a click-through, never-focusing overlay:
     * a soft orange glow around all four screen edges (slow breathing animation), and
-    * a small rounded status pill: "DeepSeek Harness 正在操控你的电脑 · 按 Esc 停止"
+    * a small blue capsule: "正在computer use | 按Esc退出"
 
   Global Esc is polled with GetAsyncKeyState(0x1B) (NOT RegisterHotKey, so we never
   steal a hotkey from another program). On Esc -> emit abort on stdout, then exit 0.
@@ -21,7 +21,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$Message = 'DeepSeek Harness 正在操控你的电脑 · 按 Esc 停止',
+    [string]$Message = '正在computer use | 按Esc退出',
     [double]$Opacity = 1.0,
     [ValidateSet('border', 'pill', 'both')][string]$Mode = 'both',
     [switch]$DisableHotkey,
@@ -355,35 +355,27 @@ namespace DshOverlay
 
         void BuildPill()
         {
-            // Deliberately NOT a capsule: just a dot, the label and the message,
-            // floating on the desktop with a soft shadow. Nothing to look at except
-            // the two words that matter.
+            // Blue capsule, one line of white text, small. The state is obvious from
+            // the colour and the wording, so nothing else has to be drawn.
             string message = Message;
-            if (string.IsNullOrEmpty(message)) message = "正在操控你的电脑 · 按 Esc 停止";
-            string label = "COMPUTER USE";
+            if (string.IsNullOrEmpty(message)) message = "正在computer use | 按Esc退出";
 
-            float labelSize = 10f * _s;
-            float msgSize = 10.5f * _s;
-            using (Font labelFont = new Font("Segoe UI", labelSize, FontStyle.Bold, GraphicsUnit.Point))
+            float msgSize = 8.5f * _s;
             using (Font msgFont = new Font("Microsoft YaHei UI", msgSize, FontStyle.Regular, GraphicsUnit.Point))
             {
-                SizeF ls, ms;
+                SizeF ms;
                 using (Bitmap probe = new Bitmap(1, 1))
                 using (Graphics pg = Graphics.FromImage(probe))
                 {
                     pg.TextRenderingHint = TextRenderingHint.AntiAlias;
-                    ls = pg.MeasureString(label, labelFont, new PointF(0, 0), StringFormat.GenericTypographic);
                     ms = pg.MeasureString(message, msgFont, new PointF(0, 0), StringFormat.GenericTypographic);
                 }
 
-                int pad = (int)Math.Round(4 * _s);
-                int dot = (int)Math.Round(7 * _s);
-                int gap = (int)Math.Round(8 * _s);
-                int sep = (int)Math.Round(11 * _s);
-                int textH = (int)Math.Ceiling(Math.Max(ls.Height, ms.Height)) + 1;
-                int ph = textH + pad * 2;
-                int pw = pad * 2 + dot + gap + (int)Math.Ceiling(ls.Width) + sep + (int)Math.Ceiling(ms.Width);
-                if (pw < 40) pw = 40;
+                int padX = (int)Math.Round(13 * _s);
+                int padY = (int)Math.Round(4 * _s);
+                int ph = (int)Math.Ceiling(ms.Height) + padY * 2 + 2;
+                int pw = (int)Math.Ceiling(ms.Width) + padX * 2 + 2;
+                if (pw < 44) pw = 44;
                 if (ph < 18) ph = 18;
 
                 _pillLayer = new Bitmap(pw, ph, PixelFormat.Format32bppArgb);
@@ -393,40 +385,25 @@ namespace DshOverlay
                     g.SmoothingMode = SmoothingMode.AntiAlias;
                     g.TextRenderingHint = TextRenderingHint.AntiAlias;
 
-                    int fgA = (int)Math.Round(250 * GlowOpacity);
-                    float cy = ph / 2f;
-                    float cx = pad + dot / 2f;
-                    using (SolidBrush halo = new SolidBrush(Color.FromArgb((int)Math.Round(90 * GlowOpacity), 60, 150, 255)))
-                    { g.FillEllipse(halo, cx - dot, cy - dot, dot * 2f, dot * 2f); }
-                    using (SolidBrush db = new SolidBrush(Color.FromArgb((int)Math.Round(255 * GlowOpacity), 70, 165, 255)))
-                    { g.FillEllipse(db, cx - dot / 2f, cy - dot / 2f, dot, dot); }
+                    int bgA = (int)Math.Round(235 * GlowOpacity);
+                    using (GraphicsPath path = RoundRect(new RectangleF(0.5f, 0.5f, pw - 1f, ph - 1f), ph / 2f))
+                    {
+                        using (SolidBrush fill = new SolidBrush(Color.FromArgb(bgA, 38, 106, 255)))
+                        { g.FillPath(fill, path); }
+                        using (Pen edge = new Pen(Color.FromArgb(Math.Min(255, bgA + 10), 118, 176, 255), Math.Max(1f, 1.2f * _s)))
+                        { g.DrawPath(edge, path); }
+                    }
 
                     StringFormat sf = new StringFormat(StringFormat.GenericTypographic);
                     sf.LineAlignment = StringAlignment.Center;
-                    sf.Alignment = StringAlignment.Near;
+                    sf.Alignment = StringAlignment.Center;
                     sf.FormatFlags = StringFormatFlags.NoWrap | StringFormatFlags.NoClip;
-
-                    float tx = pad + dot + gap;
-                    RectangleF labelRect = new RectangleF(tx, 0f, ls.Width + 2, ph);
-                    RectangleF msgRect = new RectangleF(tx + (float)Math.Ceiling(ls.Width) + sep, 0f, ms.Width + 6, ph);
-
-                    // One offset shadow pass: enough to stay readable on a light
-                    // wallpaper without putting a plate behind the text.
-                    using (SolidBrush shadow = new SolidBrush(Color.FromArgb((int)Math.Round(160 * GlowOpacity), 0, 0, 0)))
-                    {
-                        RectangleF lr2 = labelRect; lr2.Offset(1f, 1f);
-                        RectangleF mr2 = msgRect; mr2.Offset(1f, 1f);
-                        g.DrawString(label, labelFont, shadow, lr2, sf);
-                        g.DrawString(message, msgFont, shadow, mr2, sf);
-                    }
-                    using (SolidBrush lb = new SolidBrush(Color.FromArgb(fgA, 120, 195, 255)))
-                    { g.DrawString(label, labelFont, lb, labelRect, sf); }
-                    using (SolidBrush tb = new SolidBrush(Color.FromArgb(fgA, 240, 244, 250)))
-                    { g.DrawString(message, msgFont, tb, msgRect, sf); }
+                    using (SolidBrush white = new SolidBrush(Color.FromArgb((int)Math.Round(255 * GlowOpacity), 255, 255, 255)))
+                    { g.DrawString(message, msgFont, white, new RectangleF(0f, 0f, pw, ph), sf); }
                 }
 
                 _pillX = (Width - pw) / 2;
-                _pillY = (int)Math.Round(24 * _s);
+                _pillY = (int)Math.Round(44 * _s);
             }
         }
 

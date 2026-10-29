@@ -27,7 +27,7 @@
         # 'auto' shows the overlay only while a mutating action is running,
         # 'always' keeps it up for the whole session, 'never' disables it.
         overlay: auto
-        overlayMessage: 'DeepSeek Harness 正在操控你的电脑 · 按 Esc 停止'
+        overlayMessage: '正在computer use | 按Esc退出'
 
         # The pointer while computer use is active:
         #   agent - blue arrow replaces the system arrow + a blue ring follows it

@@ -46,7 +46,7 @@ export const CONFIG_DEFAULTS = {
   // 'fail' = a drag/type/key that visibly did nothing raises DROP_MISSED /
   // TYPE_MISSED / KEY_MISSED, 'warn' = say so but keep ok:true, 'off' = no check.
   verifyActions: 'fail',
-  overlayMessage: 'DeepSeek Harness is controlling your computer - press Esc to stop',
+  overlayMessage: '正在computer use | 按Esc退出',
   escStop: true,
   dryRun: false,
   requireApproval: 'never',
