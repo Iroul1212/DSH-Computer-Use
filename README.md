@@ -75,7 +75,7 @@ npm run pack:check
 npx @deepseek-ai/dsh plugin --profile web add "C:\path\dsh-computer-use-0.2.0.tgz"
 
 # straight from git
-npx @deepseek-ai/dsh plugin --profile web add "github:<owner>/dsh-computer-use#v0.2.0"
+npx @deepseek-ai/dsh plugin --profile web add "github:Iroul1212/DSH-Computer-Use#v0.2.0"
 
 # from npm, once you publish it under a name you own (see Publishing)
 npx @deepseek-ai/dsh plugin --profile web add "<your-name>"

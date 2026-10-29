@@ -75,7 +75,7 @@ npm run pack:check
 npx @deepseek-ai/dsh plugin --profile web add "C:\path\dsh-computer-use-0.2.0.tgz"
 
 # 直接从 git
-npx @deepseek-ai/dsh plugin --profile web add "github:<owner>/dsh-computer-use#v0.2.0"
+npx @deepseek-ai/dsh plugin --profile web add "github:Iroul1212/DSH-Computer-Use#v0.2.0"
 
 # 发布到你自己的 npm 名字之后（见下面的「发布」）
 npx @deepseek-ai/dsh plugin --profile web add "<your-name>"
