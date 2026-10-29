@@ -1,2 +1,2 @@
-description: "Codex-style computer use for DeepSeek Harness: see the real Windows screen and drive the real mouse and keyboard, with a visible overlay and an Esc kill switch."
+description: "A vibe-coded Windows computer use plugin for DeepSeek Harness: see the real screen and drive the real mouse and keyboard, with a Codex-style blue glow and an Esc kill switch."
 kind: "package-library"
