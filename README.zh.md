@@ -409,7 +409,7 @@ bundle 在 `cordis.patch.yml` 里只有一行，其余全部是这一行的 `con
 | 门 | 行为 |
 |---|---|
 | **Esc 急停** | overlay 武装期间，全局 Esc（边沿触发，用 `GetAsyncKeyState` 轮询，**不用** `RegisterHotKey`，所以不抢别的程序的热键）会 trip 守卫。此后每个 mutating 动作都以 `STOPPED_BY_HUMAN` 失败。只有 `computer` `{ "action": "resume" }` 能清除，且必须在 Esc 之后 5 秒以上（否则 `RESUME_TOO_SOON`）—— 模型没法悄悄自己恢复。 |
-| **Overlay** | 点击穿透、永不抢焦点、Alt-Tab 不可见的 WinForms 图层：屏幕四周是**蓝色荧光**，顶部一个 `COMPUTER USE` 胶囊（旁边是 `overlayMessage`），路过的人一眼就能看出正在被 AI 操作。指针同样一眼可辨：系统箭头换成**蓝色箭头**，并有一个脉动的蓝色**圆环**跟随光标（`cursor: agent`；`halo` 保留你原来的箭头；`off` 全关）。鼠标事件直接穿透（`WS_EX_TRANSPARENT` + `HTTRANSPARENT`），指示器永远不会吃掉 agent 自己的点击；指示器一消失，系统光标方案立刻恢复。 |
+| **Overlay** | 点击穿透、永不抢焦点、Alt-Tab 不可见的 WinForms 图层：屏幕四周一圈蓝色荧光，顶部一个**蓝色实心胶囊**，里面一行白字 `正在computer use | 按Esc退出`（文案可用 `overlayMessage` 改）。指针同样一眼可辨：系统箭头换成**蓝色箭头**，并有一个脉动的蓝色**圆环**跟随光标（`cursor: agent`；`halo` 保留你原来的箭头；`off` 全关）。鼠标事件直接穿透（`WS_EX_TRANSPARENT` + `HTTRANSPARENT`），指示器永远不会吃掉 agent 自己的点击；指示器一消失，系统光标方案立刻恢复。 |
 | **点哪儿就是哪儿** | 合成输入会送给"当下鼠标底下那个窗口"，所以前台被抢走时点击会静默落到别的 app 上。每次 click/drag/scroll 之前宿主都会用 `WindowFromPoint` 问一次：如果那个窗口和"上一张截图钉住的窗口"不是同一个进程，动作直接以 `CLICK_WRONG_WINDOW` 失败（并点名本该收到点击的 app），而不是盲点；落点在上次截图窗口之外则以 `OUTSIDE_TARGET_WINDOW` 拒绝；`app_window focus` 会校验是否真拿到前台，一次重试后仍失败就报 `FOCUS_REFUSED`。配置项 `hitTest: fail \| warn \| off`。 |
 | **不做假成功** | 拖放释放在面板上、或者键盘输入被别的 app 抢走，以前都会返回 `ok: true` 而实际什么都没发生。现在每次 drag/type 之后都会多做一次帧比对并读取当前前台窗口：画面没变化 → `DROP_MISSED` / `TYPE_MISSED`，按键送到了别的窗口 → `KEY_MISSED`（`ctrl+c` 这种本来就没视觉变化的按键不算失败）。配置项 `verifyActions: fail \| warn \| off`。 |
 | **意外死亡也会冻结** | 指示器进程意外退出（不是 Esc、也不是正常 disarm）会把 kill switch 置为 `guard-exited`；自动化宿主进程意外死亡会置为 `host-exited`。两种情况下**所有 mutating 动作立刻 fail closed**，只读动作照常可用（screenshot、status、`app_window` `list`、`ui_element` `tree`），要恢复必须显式 `resume` —— 同样带 5 秒冷却，好让人先看到那条消息。 |
