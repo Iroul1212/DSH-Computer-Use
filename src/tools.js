@@ -256,8 +256,9 @@ export function createComputerTool(runtime, config) {
           if (from.x === null || to.x === null) throw new ToolError('MISSING_COORDINATES', '`drag` needs x/y (start) and toX/toY (end).')
           const gate = await runtime.beforeMutation('computer', `drag from physical (${from.x},${from.y}) to (${to.x},${to.y})`)
           if (gate.dryRun) return { action, ok: true, dryRun: true, text: `[dry run] Would drag from physical (${from.x},${from.y}) to (${to.x},${to.y}).` }
+          // Only the ORIGIN is guarded: a drag from the component library into the
+          // schematic legitimately ends in a different window.
           await runtime.assertPointerTarget(from.x, from.y)
-          await runtime.assertPointerTarget(to.x, to.y)
           const result = await runtime.call('drag', { from, to, button: args.button ?? 'left', durationMs: 350, modifiers: args.modifiers ?? [] })
           return await afterAction(runtime, args, action, `Dragged from physical (${result.from.x},${result.from.y}) to (${result.to.x},${result.to.y}).`, { pointer: result.pointer ?? null })
         }
