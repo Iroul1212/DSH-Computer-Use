@@ -43,6 +43,9 @@ export const CONFIG_DEFAULTS = {
   // 'fail' = refuse a click aimed at another application, 'warn' = log only,
   // 'off' = trust the coordinates. See assertClickTarget().
   hitTest: 'fail',
+  // 'fail' = a drag/type/key that visibly did nothing raises DROP_MISSED /
+  // TYPE_MISSED / KEY_MISSED, 'warn' = say so but keep ok:true, 'off' = no check.
+  verifyActions: 'fail',
   overlayMessage: 'DeepSeek Harness is controlling your computer - press Esc to stop',
   escStop: true,
   dryRun: false,
@@ -126,6 +129,7 @@ export function normalizeConfig(raw) {
     overlayOpacity: num(input.overlayOpacity, 0.85, 0.05, 1),
     cursor: oneOf(input.cursor, ['agent', 'halo', 'off'], 'agent'),
     hitTest: oneOf(input.hitTest, ['fail', 'warn', 'off'], 'fail'),
+    verifyActions: oneOf(input.verifyActions, ['fail', 'warn', 'off'], 'fail'),
     escStop: input.escStop !== false,
     dryRun: input.dryRun === true,
     requireApproval: oneOf(input.requireApproval, ['never', 'mutating'], 'never'),

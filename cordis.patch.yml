@@ -41,6 +41,12 @@
         # than the one the last screenshot was of ('fail'), only logs it ('warn'),
         # or trusts the coordinates ('off').
         hitTest: fail
+
+        # After a drag/type/key, check that it actually did something: one frame
+        # diff plus the live foreground window. A drop released over a panel
+        # changes nothing -> DROP_MISSED; keystrokes that went to another app ->
+        # TYPE_MISSED / KEY_MISSED. 'warn' reports without failing, 'off' disables.
+        verifyActions: fail
         # Global Esc kill switch. When tripped, every mutating action fails
         # until the model calls computer with action "resume".
         escStop: true

@@ -260,7 +260,11 @@ export function createComputerTool(runtime, config) {
           // schematic legitimately ends in a different window.
           await runtime.assertPointerTarget(from.x, from.y)
           const result = await runtime.call('drag', { from, to, button: args.button ?? 'left', durationMs: 350, modifiers: args.modifiers ?? [] })
-          return await afterAction(runtime, args, action, `Dragged from physical (${result.from.x},${result.from.y}) to (${result.to.x},${result.to.y}).`, { pointer: result.pointer ?? null })
+          // A drag legitimately moves the foreground (library -> canvas), so only the
+          // screen is checked: a drop released over a panel changes nothing at all.
+          return await verifyEffect(runtime, args, action,
+            `Dragged from physical (${result.from.x},${result.from.y}) to (${result.to.x},${result.to.y}).`,
+            'DROP_MISSED', 'the drag', { checkFocus: false }, { pointer: result.pointer ?? null })
         }
         case 'scroll': {
           const target = runtime.toPhysical(args.x, args.y)
@@ -279,7 +283,11 @@ export function createComputerTool(runtime, config) {
           const gate = await runtime.beforeMutation('computer', `type ${JSON.stringify(text.slice(0, 60))}`)
           if (gate.dryRun) return { action, ok: true, dryRun: true, text: `[dry run] Would type ${JSON.stringify(text.slice(0, 60))}.` }
           const result = await runtime.call('type', { text, intervalMs: 0 }, { timeoutMs: Math.max(config.requestTimeoutMs, 5000 + text.length * 40) })
-          return await afterAction(runtime, args, action, `Typed ${result.chars ?? text.length} characters${config.dryRun ? ' (dry run)' : ''}.`)
+          // Keystrokes go to whatever holds the foreground, so a dialog whose field
+          // was never clicked swallows them and the tool used to say "typed".
+          return await verifyEffect(runtime, args, action,
+            `Typed ${result.chars ?? text.length} characters${config.dryRun ? ' (dry run)' : ''}.`,
+            'TYPE_MISSED', 'the typing', { checkFocus: true })
         }
         case 'key': {
           const keys = Array.isArray(args.keys) ? args.keys.filter((k) => typeof k === 'string' && k.length > 0) : []
@@ -287,6 +295,17 @@ export function createComputerTool(runtime, config) {
           const gate = await runtime.beforeMutation('computer', `press ${keys.join('+')}`)
           if (gate.dryRun) return { action, ok: true, dryRun: true, text: `[dry run] Would press ${keys.join('+')}.` }
           await runtime.call('key', { keys })
+          // A key press can legitimately change nothing, so only a stolen foreground
+          // is treated as a failure here.
+          const change = await runtime.capture({ hwnd: runtime.lastView?.window?.hwnd ?? null, compare: true, attach: false, uiSummary: 'none' }).catch(() => null)
+          const expected = runtime.lastView?.window ?? null
+          const foreground = change?.view?.foreground ?? null
+          if (expected?.pid && foreground?.pid && foreground.pid !== expected.pid && (runtime.config.verifyActions ?? 'fail') !== 'off') {
+            const message = `Pressed ${keys.join('+')}, but the foreground is "${foreground.title || '(untitled)'}" [${foreground.process ?? '?'}], not "${expected.title || 'the window you pinned'}" - the keys went to the wrong window.`
+            if ((runtime.config.verifyActions ?? 'fail') === 'fail') throw new ToolError('KEY_MISSED', message)
+            runtime.log('warn', message)
+            return { action, ok: true, change: change?.change ?? null, view: change?.view ?? null, warning: message, text: `Pressed ${keys.join('+')}.\nWARNING: ${message}` }
+          }
           return await afterAction(runtime, args, action, `Pressed ${keys.join('+')}.`)
         }
         case 'wait': {
@@ -375,6 +394,49 @@ async function afterAction(runtime, args, action, text, extra = null) {
   }
 
   return { ...receipt, action, ok: true, text }
+}
+
+/**
+ * Confirm an action that is supposed to change the screen actually did.
+ *
+ * Synthetic input goes to whatever window holds the foreground and drops land on
+ * whatever is under the point, so an action can be delivered into the void and
+ * still look successful: typing into a dialog whose field never got focus, or
+ * dropping a library item on top of the library panel. One frame-diff plus the
+ * current foreground turns that silent failure into a named error.
+ * @param runtime - the ComputerRuntime.
+ * @param args - the tool arguments (observe/verify still win when set).
+ * @param action - action name for the result.
+ * @param text - success text for the happy path.
+ * @param code - error code to throw when the effect is missing.
+ * @param what - what was supposed to happen, used in the message.
+ * @param options - { checkFocus } to also refuse a stolen foreground.
+ * @param extra - extra receipt fields.
+ * @returns {Promise<object>} the tool result.
+ */
+async function verifyEffect(runtime, args, action, text, code, what, options = {}, extra = null) {
+  const mode = runtime.config.verifyActions ?? 'fail'
+  if (mode === 'off' || config_wantsObserve(args) || config_wantsVerify(args)) {
+    return await afterAction(runtime, args, action, text, extra)
+  }
+  const expected = runtime.lastView?.window ?? null
+  const shot = await runtime.capture({ hwnd: expected?.hwnd ?? null, compare: true, attach: false, uiSummary: 'none' })
+  const change = shot.change ?? {}
+  const foreground = shot.view?.foreground ?? null
+  const problems = []
+  if (options.checkFocus && expected?.pid && foreground?.pid && foreground.pid !== expected.pid) {
+    problems.push(`the foreground is "${foreground.title || '(untitled)'}" [${foreground.process ?? '?'}], not "${expected.title || 'the window you pinned'}"`)
+  }
+  if (change.changed === false) problems.push('nothing on screen changed')
+  if (problems.length === 0) {
+    return { ...(extra ?? {}), action, ok: true, change, view: shot.view, cursor: shot.cursor, text: `${text}\n${describeChange(change).join('\n')}` }
+  }
+  const message = `${what} did not happen: ${problems.join('; ')}. Nothing useful was accomplished, so treat this action as failed: take a screenshot, and if the intended window is not in front, focus it (app_window action "focus") before retrying.`
+  if (mode === 'warn') {
+    runtime.log('warn', message)
+    return { ...(extra ?? {}), action, ok: true, change, view: shot.view, warning: message, text: `${text}\nWARNING: ${message}` }
+  }
+  throw new ToolError(code, message)
 }
 
 /**

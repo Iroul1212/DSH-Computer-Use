@@ -39,7 +39,7 @@
   },
   "scripts": {
     "smoke": "node test/smoke-win.mjs",
-    "test": "node test/schema-contract.mjs && node test/match-selftest.mjs && node test/mask-selftest.mjs && node test/plugin-selftest.mjs && node test/skills-write-selftest.mjs && node test/safety-selftest.mjs && node test/ocr-selftest.mjs && node test/guard-selftest.mjs && node test/cursor-selftest.mjs && node test/overlay-selftest.mjs && node test/observe-selftest.mjs && node test/smoke-win.mjs",
+    "test": "node test/schema-contract.mjs && node test/match-selftest.mjs && node test/mask-selftest.mjs && node test/plugin-selftest.mjs && node test/skills-write-selftest.mjs && node test/safety-selftest.mjs && node test/ocr-selftest.mjs && node test/effect-selftest.mjs && node test/guard-selftest.mjs && node test/cursor-selftest.mjs && node test/overlay-selftest.mjs && node test/observe-selftest.mjs && node test/smoke-win.mjs",
     "test:schema": "node test/schema-contract.mjs",
     "test:plugin": "node test/plugin-selftest.mjs",
     "test:safety": "node test/safety-selftest.mjs",
@@ -54,7 +54,8 @@
     "prepack": "node test/schema-contract.mjs && node test/match-selftest.mjs",
     "release": "npm run pack:check && npm publish --access public",
     "test:cursor": "node test/cursor-selftest.mjs",
-    "test:guard": "node test/guard-selftest.mjs"
+    "test:guard": "node test/guard-selftest.mjs",
+    "test:effect": "node test/effect-selftest.mjs"
   },
   "publishConfig": {
     "access": "public"
